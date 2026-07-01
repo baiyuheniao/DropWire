@@ -1,0 +1,24 @@
+# Rust
+backend/target/
+
+# Node / pnpm
+frontend/node_modules/
+frontend/dist/
+frontend/.pnpm-store/
+
+# 运行时产生的文件
+backend/temp_chunks/
+backend/uploads/
+
+# 环境变量
+.env
+.env.local
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
