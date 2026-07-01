@@ -124,6 +124,19 @@ pub async fn merge_chunks(
     }
 
     let chunk_dir = PathBuf::from(TEMP_DIR).join(&req.upload_id);
+
+    // Validate all chunks are present before merging
+    if !chunk_dir.exists() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    for i in 0..req.total_chunks {
+        let chunk_path = chunk_dir.join(format!("{}.chunk", i));
+        if !chunk_path.exists() {
+            tracing::warn!("Missing chunk {} for upload {}", i, req.upload_id);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
     let output_dir = PathBuf::from(OUTPUT_DIR);
     fs::create_dir_all(&output_dir)
         .await
