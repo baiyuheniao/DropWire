@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -67,7 +67,12 @@ pub async fn upload_chunk(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let chunk_dir = PathBuf::from(TEMP_DIR).join(&upload_id);
+    // Sanitize upload_id to prevent path traversal
+    let safe_upload_id = Path::new(&upload_id)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let chunk_dir = PathBuf::from(TEMP_DIR).join(&safe_upload_id);
     fs::create_dir_all(&chunk_dir)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -129,7 +134,12 @@ pub async fn merge_chunks(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let output_path = output_dir.join(&req.filename);
+    // Sanitize filename to prevent path traversal
+    let safe_name = Path::new(&req.filename)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let output_path = output_dir.join(&safe_name);
     let mut out = fs::File::create(&output_path)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
