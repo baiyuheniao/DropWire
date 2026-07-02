@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]

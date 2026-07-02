@@ -86,7 +86,7 @@ pub async fn upload_chunk(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let progress = {
-        let mut uploads = state.uploads.lock().unwrap();
+        let mut uploads = state.uploads.lock().await;
         let entry = uploads.entry(upload_id.clone()).or_insert_with(|| UploadEntry {
             progress: UploadProgress {
                 upload_id: upload_id.clone(),
@@ -119,7 +119,7 @@ pub async fn merge_chunks(
     Json(req): Json<MergeRequest>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     {
-        let mut uploads = state.uploads.lock().unwrap();
+        let mut uploads = state.uploads.lock().await;
         if let Some(entry) = uploads.get_mut(&req.upload_id) {
             entry.progress.status = UploadStatus::Merging;
             let _ = state
@@ -157,7 +157,7 @@ pub async fn merge_chunks(
     let _ = fs::remove_dir_all(&chunk_dir).await;
 
     {
-        let mut uploads = state.uploads.lock().unwrap();
+        let mut uploads = state.uploads.lock().await;
         if let Some(entry) = uploads.get_mut(&req.upload_id) {
             entry.progress.status = UploadStatus::Completed;
             let _ = state
