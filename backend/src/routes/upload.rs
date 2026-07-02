@@ -63,7 +63,7 @@ pub async fn upload_chunk(
         }
     }
 
-    if upload_id.is_empty() || filename.is_empty() || chunk_data.is_empty() {
+    if upload_id.is_empty() || filename.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 

@@ -4,6 +4,14 @@ import axios from 'axios'
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB
 const CONCURRENCY = 3
 
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
+
 export type TaskStatus = 'pending' | 'uploading' | 'merging' | 'done' | 'error'
 
 export interface UploadTask {
@@ -42,7 +50,7 @@ async function uploadChunk(
 
 export function useUpload() {
   async function uploadFile(file: File) {
-    const uploadId = crypto.randomUUID()
+    const uploadId = generateUUID()
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1
 
     const task: UploadTask = {

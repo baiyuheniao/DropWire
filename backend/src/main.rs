@@ -1,5 +1,6 @@
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use std::net::SocketAddr;
@@ -24,7 +25,10 @@ async fn main() {
         .allow_headers(Any);
 
     let app = Router::new()
-        .route("/upload/chunk", post(routes::upload::upload_chunk))
+        .route(
+            "/upload/chunk",
+            post(routes::upload::upload_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
         .route("/upload/merge", post(routes::upload::merge_chunks))
         .route("/ws", get(routes::ws::ws_handler))
         .layer(cors)
