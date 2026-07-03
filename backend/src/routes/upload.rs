@@ -1,18 +1,126 @@
 use axum::{
-    extract::{Multipart, State},
-    http::StatusCode,
+    body::Body,
+    extract::{Multipart, Path, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
-use crate::models::{ApiResponse, MergeRequest};
+use crate::models::{ApiResponse, FileMeta, MergeRequest};
 use crate::state::{AppState, UploadEntry, UploadProgress, UploadStatus};
 
 const TEMP_DIR: &str = "./temp_chunks";
 const OUTPUT_DIR: &str = "./uploads";
+const META_DIR: &str = "./uploads_meta";
+
+#[derive(Serialize, Clone)]
+pub struct FileInfo {
+    filename: String,
+    size: u64,
+    modified_at: Option<u64>,
+    sender: Option<String>,
+    receiver: Option<String>,
+    remark: Option<String>,
+    encrypted: Option<bool>,
+    salt: Option<String>,
+    iv: Option<String>,
+}
+
+async fn read_file_meta(filename: &str) -> FileMeta {
+    let path = PathBuf::from(META_DIR).join(format!("{}.json", filename));
+    match fs::read(&path).await {
+        Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+        Err(_) => FileMeta::default(),
+    }
+}
+
+pub async fn list_files() -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode> {
+    let output_dir = PathBuf::from(OUTPUT_DIR);
+    let mut files = Vec::new();
+
+    if output_dir.exists() {
+        let mut entries = fs::read_dir(&output_dir)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        {
+            let metadata = entry
+                .metadata()
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            if metadata.is_file() {
+                let filename = entry
+                    .file_name()
+                    .into_string()
+                    .unwrap_or_default();
+                let modified_at = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs());
+                let meta = read_file_meta(&filename).await;
+                files.push(FileInfo {
+                    filename,
+                    size: metadata.len(),
+                    modified_at,
+                    sender: meta.sender,
+                    receiver: meta.receiver,
+                    remark: meta.remark,
+                    encrypted: meta.encrypted,
+                    salt: meta.salt,
+                    iv: meta.iv,
+                });
+            }
+        }
+    }
+
+    files.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: "ok".to_string(),
+        data: Some(files),
+    }))
+}
+
+pub async fn download_file(Path(filename): Path<String>) -> Result<Response, StatusCode> {
+    let output_dir = PathBuf::from(OUTPUT_DIR);
+    let file_path = output_dir.join(&filename);
+
+    // 防止目录遍历
+    let canonical_output = output_dir
+        .canonicalize()
+        .unwrap_or_else(|_| output_dir.clone());
+    let canonical_file = file_path
+        .canonicalize()
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if !canonical_file.starts_with(canonical_output) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let data = fs::read(&canonical_file)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let disposition = format!("attachment; filename=\"{}\"", filename);
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .body(Body::from(data))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
+}
 
 pub async fn upload_chunk(
     State(state): State<Arc<AppState>>,
@@ -63,7 +171,7 @@ pub async fn upload_chunk(
         }
     }
 
-    if upload_id.is_empty() || filename.is_empty() || chunk_data.is_empty() {
+    if upload_id.is_empty() || filename.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -143,6 +251,26 @@ pub async fn merge_chunks(
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
+
+    let meta_dir = PathBuf::from(META_DIR);
+    fs::create_dir_all(&meta_dir)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let meta = FileMeta {
+        sender: req.sender.clone(),
+        receiver: req.receiver.clone(),
+        remark: req.remark.clone(),
+        encrypted: req.encrypted,
+        salt: req.salt.clone(),
+        iv: req.iv.clone(),
+    };
+    let meta_path = meta_dir.join(format!("{}.json", req.filename));
+    fs::write(
+        &meta_path,
+        serde_json::to_vec_pretty(&meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let _ = fs::remove_dir_all(&chunk_dir).await;
 

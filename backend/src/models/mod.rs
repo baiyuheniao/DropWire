@@ -13,4 +13,20 @@ pub struct MergeRequest {
     pub upload_id: String,
     pub filename: String,
     pub total_chunks: usize,
+    pub sender: Option<String>,
+    pub receiver: Option<String>,
+    pub remark: Option<String>,
+    pub encrypted: Option<bool>,
+    pub salt: Option<String>,
+    pub iv: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct FileMeta {
+    pub sender: Option<String>,
+    pub receiver: Option<String>,
+    pub remark: Option<String>,
+    pub encrypted: Option<bool>,
+    pub salt: Option<String>,
+    pub iv: Option<String>,
 }
