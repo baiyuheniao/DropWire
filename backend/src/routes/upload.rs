@@ -19,6 +19,13 @@ const TEMP_DIR: &str = "./temp_chunks";
 const OUTPUT_DIR: &str = "./uploads";
 const META_DIR: &str = "./uploads_meta";
 
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 #[derive(Serialize, Clone)]
 pub struct FileInfo {
     filename: String,
@@ -30,6 +37,7 @@ pub struct FileInfo {
     encrypted: Option<bool>,
     salt: Option<String>,
     iv: Option<String>,
+    expires_at: Option<u64>,
 }
 
 async fn read_file_meta(filename: &str) -> FileMeta {
@@ -43,6 +51,7 @@ async fn read_file_meta(filename: &str) -> FileMeta {
 pub async fn list_files() -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode> {
     let output_dir = PathBuf::from(OUTPUT_DIR);
     let mut files = Vec::new();
+    let now = now_secs();
 
     if output_dir.exists() {
         let mut entries = fs::read_dir(&output_dir)
@@ -69,6 +78,11 @@ pub async fn list_files() -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode
                     .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs());
                 let meta = read_file_meta(&filename).await;
+                if let Some(exp) = meta.expires_at {
+                    if exp > 0 && exp <= now {
+                        continue;
+                    }
+                }
                 files.push(FileInfo {
                     filename,
                     size: metadata.len(),
@@ -79,6 +93,7 @@ pub async fn list_files() -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode
                     encrypted: meta.encrypted,
                     salt: meta.salt,
                     iv: meta.iv,
+                    expires_at: meta.expires_at,
                 });
             }
         }
@@ -106,6 +121,13 @@ pub async fn download_file(Path(filename): Path<String>) -> Result<Response, Sta
         .map_err(|_| StatusCode::NOT_FOUND)?;
     if !canonical_file.starts_with(canonical_output) {
         return Err(StatusCode::FORBIDDEN);
+    }
+
+    let meta = read_file_meta(&filename).await;
+    if let Some(exp) = meta.expires_at {
+        if exp > 0 && exp <= now_secs() {
+            return Err(StatusCode::GONE);
+        }
     }
 
     let data = fs::read(&canonical_file)
@@ -256,6 +278,14 @@ pub async fn merge_chunks(
     fs::create_dir_all(&meta_dir)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let expires_at = req.expires_in_minutes.and_then(|mins| {
+        if mins > 0 {
+            Some(now_secs() + mins * 60)
+        } else {
+            None
+        }
+    });
+
     let meta = FileMeta {
         sender: req.sender.clone(),
         receiver: req.receiver.clone(),
@@ -263,6 +293,7 @@ pub async fn merge_chunks(
         encrypted: req.encrypted,
         salt: req.salt.clone(),
         iv: req.iv.clone(),
+        expires_at,
     };
     let meta_path = meta_dir.join(format!("{}.json", req.filename));
     fs::write(

@@ -3,9 +3,18 @@
     <div class="receive-card">
       <div class="receive-header">
         <h2>可接收文件</h2>
-        <button class="refresh-btn" :disabled="loading" @click="fetchFiles">
-          {{ loading ? '刷新中...' : '刷新列表' }}
-        </button>
+        <div class="header-actions">
+          <button class="history-btn" @click="showHistory = true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            </svg>
+            历史记录
+          </button>
+          <button class="refresh-btn" :disabled="loading" @click="fetchFiles">
+            {{ loading ? '刷新中...' : '刷新列表' }}
+          </button>
+        </div>
       </div>
 
       <div v-if="error" class="error-msg">{{ error }}</div>
@@ -56,6 +65,12 @@
         </li>
       </ul>
     </div>
+
+    <HistoryModal
+      v-if="showHistory"
+      initial-tab="receive"
+      @close="showHistory = false"
+    />
   </div>
 </template>
 
@@ -63,8 +78,10 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import axios from 'axios'
 import { type User } from './AccountModal.vue'
+import HistoryModal from './HistoryModal.vue'
 import { settings } from '../composables/useSettings'
 import { decryptFile } from '../composables/useCrypto'
+import { addHistory } from '../composables/useHistory'
 
 interface FileInfo {
   filename: string
@@ -85,6 +102,7 @@ const props = defineProps<{
 const files = ref<FileInfo[]>([])
 const loading = ref(false)
 const error = ref('')
+const showHistory = ref(false)
 const decryptPasswords = reactive<Record<string, string>>({})
 
 const filteredFiles = computed(() => {
@@ -128,6 +146,8 @@ async function download(filename: string) {
       responseType: 'blob',
     })
     triggerDownload(new Blob([res.data]), filename)
+    const file = files.value.find((f) => f.filename === filename)
+    recordReceive(file ?? { filename, size: Number(res.headers['content-length']) || 0 })
   } catch (err: any) {
     error.value = err?.response?.data?.message || '下载失败'
   }
@@ -150,9 +170,22 @@ async function downloadDecrypted(file: FileInfo) {
     })
     const plaintext = await decryptFile(res.data, password, file.salt, file.iv)
     triggerDownload(new Blob([plaintext]), file.filename)
+    recordReceive(file)
   } catch (err: any) {
     error.value = '解密失败：密码错误或文件损坏'
   }
+}
+
+function recordReceive(file: { filename: string; size: number; sender?: string; receiver?: string; remark?: string; encrypted?: boolean }) {
+  addHistory({
+    type: 'receive',
+    filename: file.filename,
+    size: file.size,
+    sender: file.sender,
+    receiver: file.receiver,
+    remark: file.remark,
+    encrypted: file.encrypted,
+  })
 }
 
 function formatSize(bytes: number): string {
@@ -212,8 +245,8 @@ onUnmounted(stopAutoRefresh)
 }
 
 .receive-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: 16px;
   padding: 24px;
 }
@@ -228,22 +261,53 @@ onUnmounted(stopAutoRefresh)
 .receive-header h2 {
   font-size: 18px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.history-btn:hover {
+  background: var(--bg-card);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.history-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .refresh-btn {
   padding: 8px 16px;
-  background: #f3f4f6;
-  border: 1px solid #d1d5db;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   font-size: 14px;
-  color: #374151;
+  color: var(--text-secondary);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .refresh-btn:hover:not(:disabled) {
-  background: #e5e7eb;
+  background: var(--border-color);
 }
 
 .refresh-btn:disabled {
@@ -254,8 +318,8 @@ onUnmounted(stopAutoRefresh)
 .error-msg {
   margin-bottom: 16px;
   padding: 10px 14px;
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--danger-bg);
+  color: var(--danger-text);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -263,7 +327,7 @@ onUnmounted(stopAutoRefresh)
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: #6b7280;
+  color: var(--text-tertiary);
 }
 
 .empty-state .icon {
@@ -271,8 +335,8 @@ onUnmounted(stopAutoRefresh)
   height: 64px;
   margin: 0 auto 16px;
   border-radius: 50%;
-  background: #eff6ff;
-  color: #3b82f6;
+  background: var(--bg-primary-soft);
+  color: var(--primary);
   display: grid;
   place-items: center;
 }
@@ -299,14 +363,14 @@ onUnmounted(stopAutoRefresh)
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   transition: background 0.2s, border-color 0.2s;
 }
 
 .file-item:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
 }
 
 .file-info {
@@ -317,7 +381,7 @@ onUnmounted(stopAutoRefresh)
 .file-name {
   font-size: 15px;
   font-weight: 500;
-  color: #1f2937;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -340,8 +404,8 @@ onUnmounted(stopAutoRefresh)
 }
 
 .tag.sender {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--bg-primary-soft);
+  color: var(--primary-text);
 }
 
 .tag.receiver {
@@ -355,14 +419,14 @@ onUnmounted(stopAutoRefresh)
 }
 
 .tag.encrypted {
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 .file-meta {
   margin-top: 6px;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-tertiary);
   display: flex;
   gap: 12px;
 }
@@ -372,24 +436,28 @@ onUnmounted(stopAutoRefresh)
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .decrypt-input {
   width: 120px;
   padding: 8px 10px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text-primary);
   outline: none;
 }
 
 .decrypt-input:focus {
-  border-color: #3b82f6;
+  border-color: var(--primary);
 }
 
 .download-btn {
   padding: 8px 16px;
-  background: #3b82f6;
+  background: var(--primary);
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -401,6 +469,6 @@ onUnmounted(stopAutoRefresh)
 }
 
 .download-btn:hover {
-  background: #2563eb;
+  background: var(--primary-hover);
 }
 </style>

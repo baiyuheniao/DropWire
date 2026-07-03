@@ -11,6 +11,9 @@ importers:
       axios:
         specifier: ^1.6.0
         version: 1.18.1
+      qrcode.vue:
+        specifier: ^3.10.0
+        version: 3.10.0(vue@3.5.39(typescript@5.9.3))
       vue:
         specifier: ^3.4.0
         version: 3.5.39(typescript@5.9.3)
@@ -547,6 +550,11 @@ packages:
     resolution: {integrity: sha512-cJ+oHTW1VAEa8cJslgmUZrc+sjRKgAKl3Zyse6+PV38hZe/V6Z14TbCuXcan9F9ghlz4QrFr2c92TNF82UkYHA==}
     engines: {node: '>=10'}
 
+  qrcode.vue@3.10.0:
+    resolution: {integrity: sha512-1bjeBds9hRKMszZuBuYQZor9HdJYWtb0S44HG1JofZ9uicpJpdF+TtDvqo3+2ZlH0k80WVIkmiKB4hq0/N6/rA==}
+    peerDependencies:
+      vue: ^3.0.0
+
   rollup@4.62.2:
     resolution: {integrity: sha512-RFnrW4lhXA3s3eqHDZvN654g8OTjzRfqpIRJYczCGB6HzphckVAi/Qh4tbPUbRuDi7s1Llv8g/NspLkttY3gTA==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
@@ -1044,6 +1052,10 @@ snapshots:
       source-map-js: 1.2.1
 
   proxy-from-env@2.1.0: {}
+
+  qrcode.vue@3.10.0(vue@3.5.39(typescript@5.9.3)):
+    dependencies:
+      vue: 3.5.39(typescript@5.9.3)
 
   rollup@4.62.2:
     dependencies:

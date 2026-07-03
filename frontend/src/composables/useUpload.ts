@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import axios from 'axios'
 import { encryptFile } from './useCrypto'
+import { settings } from './useSettings'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB
 const CONCURRENCY = 3
@@ -20,6 +21,7 @@ export interface UploadOptions {
   receiver?: string
   remark?: string
   password?: string
+  expiresInMinutes?: number
 }
 
 export interface UploadTask {
@@ -29,6 +31,9 @@ export interface UploadTask {
   uploadedChunks: number
   status: TaskStatus
   error?: string
+  fileSize?: number
+  downloadUrl?: string
+  expiresAt?: number
 }
 
 const tasks = ref<Map<string, UploadTask>>(new Map())
@@ -60,6 +65,15 @@ async function uploadChunk(
   await axios.post('/upload/chunk', form)
 }
 
+function buildDownloadUrl(filename: string): string {
+  const encoded = encodeURIComponent(filename)
+  const base = settings.value.apiBase.trim()
+  if (base) {
+    return `${base.replace(/\/$/, '')}/download/${encoded}`
+  }
+  return `${window.location.origin}/download/${encoded}`
+}
+
 export function useUpload() {
   async function uploadFile(file: File, options?: UploadOptions) {
     const uploadId = generateUUID()
@@ -70,6 +84,7 @@ export function useUpload() {
       totalChunks: 0,
       uploadedChunks: 0,
       status: 'uploading',
+      fileSize: file.size,
     }
     setTask(task)
 
@@ -114,7 +129,8 @@ export function useUpload() {
     setTask({ ...tasks.value.get(uploadId)!, status: 'merging' })
 
     try {
-      await axios.post('/upload/merge', {
+      const expiresInMinutes = options?.expiresInMinutes ?? settings.value.qrValidityMinutes
+      const res = await axios.post('/upload/merge', {
         upload_id: uploadId,
         filename: file.name,
         total_chunks: totalChunks,
@@ -124,8 +140,20 @@ export function useUpload() {
         encrypted: encryptedMeta.encrypted,
         salt: encryptedMeta.salt || null,
         iv: encryptedMeta.iv || null,
+        expires_in_minutes: expiresInMinutes > 0 ? expiresInMinutes : null,
       })
-      setTask({ ...tasks.value.get(uploadId)!, status: 'done' })
+      const returnedFilename = res.data.data as string | undefined
+      const finalFilename = returnedFilename || file.name
+      const expiresAt = expiresInMinutes > 0
+        ? Math.floor(Date.now() / 1000) + expiresInMinutes * 60
+        : undefined
+      setTask({
+        ...tasks.value.get(uploadId)!,
+        status: 'done',
+        filename: finalFilename,
+        downloadUrl: buildDownloadUrl(finalFilename),
+        expiresAt,
+      })
     } catch (err) {
       setTask({ ...tasks.value.get(uploadId)!, status: 'error', error: String(err) })
     }

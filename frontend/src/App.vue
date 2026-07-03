@@ -2,7 +2,7 @@
   <div class="app">
     <header class="top-bar">
       <div class="brand">
-        <img class="brand-logo" src="/logo.png" alt="DropWire" />
+        <img class="brand-logo" src="/logo.png?v=2" alt="DropWire" />
         <span class="brand-name">DropWire</span>
       </div>
 
@@ -49,15 +49,32 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useWebSocket } from './composables/useWebSocket'
-import { loadSettings, settings } from './composables/useSettings'
+import { loadSettings, settings, type ThemeMode } from './composables/useSettings'
 import SendView from './components/SendView.vue'
 import ReceiveView from './components/ReceiveView.vue'
 import SettingsView from './components/SettingsView.vue'
 import AccountModal, { type User } from './components/AccountModal.vue'
 
 loadSettings()
+
+const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+
+function effectiveTheme(): Exclude<ThemeMode, 'system'> {
+  if (settings.value.theme === 'system') {
+    return mediaQuery.matches ? 'dark' : 'light'
+  }
+  return settings.value.theme
+}
+
+function applyTheme() {
+  document.documentElement.classList.toggle('dark', effectiveTheme() === 'dark')
+}
+
+applyTheme()
+watch(() => settings.value.theme, applyTheme)
+mediaQuery.addEventListener('change', applyTheme)
 
 const wsUrl = computed(() => {
   const base = settings.value.apiBase.trim()
@@ -102,6 +119,54 @@ onMounted(() => {
 </script>
 
 <style>
+:root {
+  color-scheme: light;
+  --bg-body: #f5f6f8;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f9fafb;
+  --bg-input: #ffffff;
+  --bg-soft: #f3f4f6;
+  --bg-primary-soft: #eff6ff;
+  --border-color: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text-primary: #1f2937;
+  --text-secondary: #374151;
+  --text-tertiary: #6b7280;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-text: #1d4ed8;
+  --danger-bg: #fee2e2;
+  --danger-text: #b91c1c;
+  --success-text: #047857;
+  --warning-bg: #fef3c7;
+  --warning-text: #b45309;
+  --shadow: rgba(0, 0, 0, 0.04);
+}
+
+html.dark {
+  color-scheme: dark;
+  --bg-body: #0f172a;
+  --bg-card: #1f2937;
+  --bg-card-hover: #27354f;
+  --bg-input: #111827;
+  --bg-soft: #1f2937;
+  --bg-primary-soft: #1e3a8a;
+  --border-color: #374151;
+  --border-strong: #4b5563;
+  --text-primary: #f9fafb;
+  --text-secondary: #e5e7eb;
+  --text-tertiary: #9ca3af;
+  --primary: #60a5fa;
+  --primary-hover: #3b82f6;
+  --primary-text: #93c5fd;
+  --danger-bg: #450a0a;
+  --danger-text: #fca5a5;
+  --success-text: #34d399;
+  --warning-bg: #451a03;
+  --warning-text: #fcd34d;
+  --shadow: rgba(0, 0, 0, 0.25);
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -110,8 +175,8 @@ onMounted(() => {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #f5f6f8;
-  color: #1f2937;
+  background: var(--bg-body);
+  color: var(--text-primary);
   min-height: 100vh;
 }
 
@@ -128,9 +193,9 @@ body {
   justify-content: flex-start;
   padding: 0 24px;
   height: 64px;
-  background: #fff;
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 1px 3px var(--shadow);
 }
 
 .brand {
@@ -148,7 +213,7 @@ body {
 .brand-name {
   font-size: 20px;
   font-weight: 700;
-  color: #374151;
+  color: var(--text-secondary);
   letter-spacing: -0.3px;
 }
 
@@ -162,35 +227,31 @@ body {
 
 .tab {
   padding: 10px 28px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
   border-bottom: none;
   border-radius: 12px 12px 0 0;
-  background: #f3f4f6;
-  color: #6b7280;
+  background: var(--bg-soft);
+  color: var(--text-tertiary);
   font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+  transform-origin: bottom center;
   position: relative;
   top: 1px;
 }
 
-.tab {
-  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
-  transform-origin: bottom center;
-}
-
 .tab:hover {
-  background: #e5e7eb;
-  color: #4b5563;
+  background: var(--border-color);
+  color: var(--text-secondary);
   transform: scale(1.05);
 }
 
 .tab.active {
-  background: #f5f6f8;
-  color: #1f2937;
+  background: var(--bg-body);
+  color: var(--text-primary);
   font-weight: 600;
-  border-color: #e5e7eb #e5e7eb #f5f6f8;
+  border-color: var(--border-color) var(--border-color) var(--bg-body);
   z-index: 1;
   transform: scale(1.08);
 }
@@ -206,12 +267,12 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-color);
   display: grid;
   place-items: center;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-tertiary);
   cursor: pointer;
   overflow: hidden;
   user-select: none;
@@ -220,12 +281,12 @@ body {
 
 .avatar:hover {
   transform: scale(1.08);
-  border-color: #3b82f6;
+  border-color: var(--primary);
 }
 
 .avatar.logged {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--bg-primary-soft);
+  color: var(--primary-text);
   font-weight: 600;
 }
 
@@ -237,7 +298,7 @@ body {
 
 .status-label {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-tertiary);
 }
 
 .status-badge {
@@ -245,12 +306,12 @@ body {
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
 
 .status-badge.online {
-  background: #3b82f6;
+  background: var(--primary);
   color: #fff;
 }
 

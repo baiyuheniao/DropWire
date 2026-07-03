@@ -57,6 +57,23 @@
             <span>{{ pct(task) }}%</span>
           </div>
 
+          <div v-if="task.status === 'done' && task.downloadUrl" class="qr-area">
+            <div class="qr-code">
+              <QRCodeVue :value="task.downloadUrl" :size="128" level="M" />
+            </div>
+            <div class="qr-info">
+              <p class="qr-hint">扫码下载</p>
+              <p v-if="task.expiresAt" class="qr-expires">
+                有效期至 {{ formatExpireTime(task.expiresAt) }}
+              </p>
+              <p v-else class="qr-expires">永久有效</p>
+              <input :value="task.downloadUrl" readonly class="qr-url" />
+              <button class="copy-btn" @click.stop="copyUrl(task.downloadUrl, task.uploadId)">
+                {{ copiedId === task.uploadId ? '已复制' : '复制链接' }}
+              </button>
+            </div>
+          </div>
+
           <p v-if="task.error" class="error-msg">{{ task.error }}</p>
         </div>
       </div>
@@ -65,8 +82,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import QRCodeVue from 'qrcode.vue'
 import { useUpload, type UploadOptions, type UploadTask, type TaskStatus } from '../composables/useUpload'
+import { addHistory } from '../composables/useHistory'
 
 const props = defineProps<{
   options?: UploadOptions
@@ -74,7 +93,63 @@ const props = defineProps<{
 
 const fileInput = ref<HTMLInputElement>()
 const isDragging = ref(false)
+const copiedId = ref<string>('')
 const { tasks, uploadFile } = useUpload()
+
+const recordedIds = new Set<string>()
+
+watch(
+  () => tasks.value,
+  (next) => {
+    next.forEach((task) => {
+      if (task.status === 'done' && !recordedIds.has(task.uploadId)) {
+        recordedIds.add(task.uploadId)
+        addHistory({
+          type: 'send',
+          filename: task.filename,
+          size: task.fileSize || 0,
+          sender: props.options?.sender,
+          receiver: props.options?.receiver,
+          remark: props.options?.remark,
+          encrypted: !!props.options?.password,
+          expiresAt: task.expiresAt,
+          url: task.downloadUrl,
+        })
+      }
+    })
+  },
+  { deep: true, immediate: true },
+)
+
+async function copyUrl(url?: string, uploadId?: string) {
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+  } catch {
+    const input = document.createElement('input')
+    input.value = url
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand('copy')
+    document.body.removeChild(input)
+  }
+  if (uploadId) {
+    copiedId.value = uploadId
+    setTimeout(() => {
+      if (copiedId.value === uploadId) copiedId.value = ''
+    }, 2000)
+  }
+}
+
+function formatExpireTime(timestamp: number): string {
+  const date = new Date(timestamp * 1000)
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 function onDrop(e: DragEvent) {
   isDragging.value = false
@@ -112,20 +187,20 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
 /* Drop zone */
 .drop-zone {
   position: relative;
-  border: 2px dashed #d1d5db;
+  border: 2px dashed var(--border-strong);
   border-radius: 16px;
   padding: 56px 40px;
   text-align: center;
   cursor: pointer;
-  background: #fff;
+  background: var(--bg-card);
   transition: all 0.2s ease;
 }
 
 .drop-zone:hover,
 .drop-zone.drag-over {
-  border-color: #3b82f6;
-  background: #eff6ff;
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.08);
+  border-color: var(--primary);
+  background: var(--bg-primary-soft);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
 }
 
 .drop-zone.has-tasks {
@@ -142,10 +217,10 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   height: 56px;
   margin: 0 auto 16px;
   border-radius: 16px;
-  background: #eff6ff;
+  background: var(--bg-primary-soft);
   display: grid;
   place-items: center;
-  color: #3b82f6;
+  color: var(--primary);
 }
 
 .drop-zone.has-tasks .drop-icon {
@@ -167,7 +242,7 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
 .drop-title {
   font-size: 17px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary);
   margin-bottom: 4px;
 }
 
@@ -177,18 +252,18 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
 
 .drop-sub {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-tertiary);
 }
 
 /* Empty state */
 .empty-state {
   text-align: center;
   padding: 24px;
-  color: #9ca3af;
+  color: var(--text-tertiary);
   font-size: 14px;
   border-radius: 12px;
-  border: 1px dashed #e5e7eb;
-  background: #fff;
+  border: 1px dashed var(--border-color);
+  background: var(--bg-card);
 }
 
 /* Task cards */
@@ -204,15 +279,15 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   gap: 14px;
   padding: 16px 18px;
   border-radius: 12px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 1px 2px var(--shadow);
   transition: all 0.2s ease;
 }
 
 .task-card:hover {
-  border-color: #d1d5db;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  border-color: var(--border-strong);
+  box-shadow: 0 2px 6px var(--shadow);
 }
 
 .task-icon {
@@ -220,10 +295,10 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: #eff6ff;
+  background: var(--bg-primary-soft);
   display: grid;
   place-items: center;
-  color: #3b82f6;
+  color: var(--primary);
 }
 
 .task-icon svg {
@@ -247,7 +322,7 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
 .filename {
   font-weight: 500;
   font-size: 14px;
-  color: #1f2937;
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -260,20 +335,20 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   border-radius: 10px;
   white-space: nowrap;
   font-weight: 600;
-  background: #f3f4f6;
-  color: #6b7280;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-soft);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-color);
 }
 
-.badge.uploading { color: #2563eb; background: #dbeafe; border-color: #bfdbfe; }
-.badge.merging   { color: #b45309; background: #fef3c7; border-color: #fde68a; }
-.badge.done      { color: #15803d; background: #dcfce7; border-color: #bbf7d0; }
-.badge.error     { color: #b91c1c; background: #fee2e2; border-color: #fecaca; }
+.badge.uploading { color: var(--primary-text); background: var(--bg-primary-soft); border-color: rgba(59, 130, 246, 0.25); }
+.badge.merging   { color: var(--warning-text); background: var(--warning-bg); border-color: rgba(245, 158, 11, 0.25); }
+.badge.done      { color: var(--success-text); background: rgba(52, 211, 153, 0.12); border-color: rgba(34, 197, 94, 0.25); }
+.badge.error     { color: var(--danger-text); background: var(--danger-bg); border-color: rgba(239, 68, 68, 0.25); }
 
 /* Progress bar */
 .progress-track {
   height: 7px;
-  background: #e5e7eb;
+  background: var(--border-color);
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -282,7 +357,7 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
 .progress-bar {
   height: 100%;
   border-radius: 4px;
-  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  background: linear-gradient(90deg, var(--primary), #60a5fa);
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
@@ -322,12 +397,12 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-tertiary);
 }
 
 .error-msg {
   font-size: 12px;
-  color: #dc2626;
+  color: var(--danger-text);
   margin-top: 6px;
   line-height: 1.4;
 }
@@ -346,5 +421,72 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
 .task-leave-to {
   opacity: 0;
   transform: translateX(16px);
+}
+
+.qr-area {
+  display: flex;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border-color);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.qr-code {
+  flex-shrink: 0;
+  width: 128px;
+  height: 128px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--border-color);
+}
+
+.qr-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qr-hint {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.qr-expires {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.qr-url {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.copy-btn {
+  align-self: flex-start;
+  padding: 7px 14px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.copy-btn:hover {
+  background: var(--primary-hover);
 }
 </style>

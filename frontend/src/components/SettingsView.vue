@@ -26,6 +26,21 @@
       </section>
 
       <section class="section">
+        <h3>外观</h3>
+        <div class="theme-options">
+          <button
+            v-for="opt in themeOptions"
+            :key="opt.value"
+            class="theme-btn"
+            :class="{ active: form.theme === opt.value }"
+            @click="saveTheme(opt.value)"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+      </section>
+
+      <section class="section">
         <h3>服务器地址</h3>
         <p class="hint">留空则使用当前站点代理；修改后需刷新页面生效</p>
         <div class="input-row">
@@ -40,19 +55,37 @@
       </section>
 
       <section class="section">
+        <h3>发送二维码有效期</h3>
+        <p class="hint">发送文件生成的二维码与下载链接在多久后自动失效</p>
+        <div class="theme-options">
+          <button
+            v-for="opt in qrOptions"
+            :key="opt.value"
+            class="theme-btn"
+            :class="{ active: form.qrValidityMinutes === opt.value }"
+            @click="saveQr(opt.value)"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+      </section>
+
+      <section class="section">
         <h3>接收列表</h3>
-        <label class="checkbox-row">
-          <input v-model="form.autoRefresh" type="checkbox" />
-          <span>自动刷新文件列表</span>
-        </label>
-        <div v-if="form.autoRefresh" class="interval-row">
-          <span>刷新间隔（秒）</span>
-          <input
-            v-model.number="form.refreshInterval"
-            type="number"
-            min="3"
-            max="300"
-          />
+        <div class="refresh-row">
+          <label class="checkbox-row">
+            <input v-model="form.autoRefresh" type="checkbox" />
+            <span>自动刷新文件列表</span>
+          </label>
+          <div v-if="form.autoRefresh" class="interval-row">
+            <span>刷新间隔（秒）</span>
+            <input
+              v-model.number="form.refreshInterval"
+              type="number"
+              min="3"
+              max="300"
+            />
+          </div>
         </div>
         <button class="btn-primary save-btn" @click="saveRefresh">保存</button>
       </section>
@@ -68,7 +101,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { type User } from './AccountModal.vue'
-import { settings, saveSettings } from '../composables/useSettings'
+import { QR_VALIDITY_OPTIONS, settings, saveSettings, type ThemeMode } from '../composables/useSettings'
 
 defineProps<{
   user: User | null
@@ -82,10 +115,28 @@ const emit = defineEmits<{
 const form = reactive({ ...settings.value })
 const serverSaved = ref(false)
 
+const themeOptions: { value: ThemeMode; label: string }[] = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+]
+
+const qrOptions = QR_VALIDITY_OPTIONS
+
+function saveTheme(value: ThemeMode) {
+  form.theme = value
+  saveSettings({ theme: value })
+}
+
 function saveServer() {
   saveSettings({ apiBase: form.apiBase.trim() })
   serverSaved.value = true
   setTimeout(() => (serverSaved.value = false), 3000)
+}
+
+function saveQr(value: number) {
+  form.qrValidityMinutes = value
+  saveSettings({ qrValidityMinutes: value })
 }
 
 function saveRefresh() {
@@ -104,8 +155,8 @@ function saveRefresh() {
 }
 
 .settings-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: 16px;
   padding: 24px;
 }
@@ -113,13 +164,13 @@ function saveRefresh() {
 .settings-card h2 {
   font-size: 18px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary);
   margin-bottom: 20px;
 }
 
 .section {
   padding: 20px 0;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .section:last-child {
@@ -130,13 +181,13 @@ function saveRefresh() {
 .section h3 {
   font-size: 15px;
   font-weight: 600;
-  color: #374151;
+  color: var(--text-secondary);
   margin-bottom: 14px;
 }
 
 .hint {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-tertiary);
   margin-bottom: 12px;
 }
 
@@ -151,19 +202,19 @@ function saveRefresh() {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-color);
   display: grid;
   place-items: center;
   font-size: 18px;
-  color: #6b7280;
+  color: var(--text-tertiary);
   overflow: hidden;
   flex-shrink: 0;
 }
 
 .avatar-large.logged {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--bg-primary-soft);
+  color: var(--primary-text);
   font-weight: 600;
 }
 
@@ -180,12 +231,12 @@ function saveRefresh() {
 .name {
   font-size: 15px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary);
 }
 
 .username {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-tertiary);
   margin-top: 2px;
 }
 
@@ -193,6 +244,34 @@ function saveRefresh() {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.theme-options {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.theme-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.theme-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
 }
 
 .input-row {
@@ -205,33 +284,43 @@ function saveRefresh() {
   flex: 1;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .input-row input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.refresh-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .interval-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 12px 0;
   font-size: 14px;
-  color: #374151;
+  color: var(--text-secondary);
 }
 
 .interval-row input {
   width: 80px;
   padding: 8px 10px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
   outline: none;
 }
 
@@ -240,14 +329,14 @@ function saveRefresh() {
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  color: #374151;
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
 .checkbox-row input {
   width: 16px;
   height: 16px;
-  accent-color: #3b82f6;
+  accent-color: var(--primary);
 }
 
 .save-btn {
@@ -266,26 +355,26 @@ function saveRefresh() {
 }
 
 .btn-primary {
-  background: #3b82f6;
+  background: var(--primary);
   color: #fff;
 }
 
 .btn-primary:hover {
-  background: #2563eb;
+  background: var(--primary-hover);
 }
 
 .btn-danger {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
 
 .btn-danger:hover {
-  background: #fecaca;
+  opacity: 0.9;
 }
 
 .success-msg {
   margin-top: 10px;
   font-size: 13px;
-  color: #047857;
+  color: var(--success-text);
 }
 </style>

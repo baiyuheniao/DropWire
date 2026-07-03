@@ -1,11 +1,28 @@
 import { ref } from 'vue'
 import axios from 'axios'
 
+export type ThemeMode = 'light' | 'dark' | 'system'
+
 export interface AppSettings {
   apiBase: string
   autoRefresh: boolean
   refreshInterval: number
+  theme: ThemeMode
+  qrValidityMinutes: number
 }
+
+export interface QrValidityOption {
+  label: string
+  value: number
+}
+
+export const QR_VALIDITY_OPTIONS: QrValidityOption[] = [
+  { label: '15 分钟', value: 15 },
+  { label: '1 小时', value: 60 },
+  { label: '24 小时', value: 1440 },
+  { label: '7 天', value: 10080 },
+  { label: '永久', value: 0 },
+]
 
 const SETTINGS_KEY = 'dropwire_settings'
 
@@ -13,6 +30,8 @@ const defaultSettings: AppSettings = {
   apiBase: '',
   autoRefresh: false,
   refreshInterval: 10,
+  theme: 'system',
+  qrValidityMinutes: 60,
 }
 
 export const settings = ref<AppSettings>({ ...defaultSettings })

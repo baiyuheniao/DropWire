@@ -180,9 +180,9 @@ function logout() {
 
 .modal {
   width: 380px;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
   overflow: hidden;
 }
 
@@ -191,26 +191,26 @@ function logout() {
   align-items: center;
   justify-content: space-between;
   padding: 18px 20px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .modal-header h3 {
   font-size: 18px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary);
 }
 
 .close-btn {
   background: none;
   border: none;
   font-size: 24px;
-  color: #9ca3af;
+  color: var(--text-tertiary);
   cursor: pointer;
   line-height: 1;
 }
 
 .close-btn:hover {
-  color: #4b5563;
+  color: var(--text-secondary);
 }
 
 .modal-body {
@@ -226,33 +226,35 @@ function logout() {
   margin-bottom: 6px;
   font-size: 14px;
   font-weight: 500;
-  color: #374151;
+  color: var(--text-secondary);
 }
 
 .form-group input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
   outline: none;
   transition: border-color 0.2s;
 }
 
 .form-group input:focus {
-  border-color: #3b82f6;
+  border-color: var(--primary);
 }
 
 .error {
   margin-bottom: 12px;
-  color: #ef4444;
+  color: var(--danger-text);
   font-size: 13px;
 }
 
 .submit-btn {
   width: 100%;
   padding: 11px;
-  background: #3b82f6;
+  background: var(--primary);
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -263,7 +265,7 @@ function logout() {
 }
 
 .submit-btn:hover {
-  background: #2563eb;
+  background: var(--primary-hover);
 }
 
 .link-btn {
@@ -272,7 +274,7 @@ function logout() {
   padding: 8px;
   background: none;
   border: none;
-  color: #3b82f6;
+  color: var(--primary);
   font-size: 14px;
   cursor: pointer;
 }

@@ -19,6 +19,7 @@ pub struct MergeRequest {
     pub encrypted: Option<bool>,
     pub salt: Option<String>,
     pub iv: Option<String>,
+    pub expires_in_minutes: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -29,4 +30,5 @@ pub struct FileMeta {
     pub encrypted: Option<bool>,
     pub salt: Option<String>,
     pub iv: Option<String>,
+    pub expires_at: Option<u64>,
 }
