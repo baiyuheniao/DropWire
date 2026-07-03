@@ -32,6 +32,7 @@ async fn main() {
         .route("/upload/merge", post(routes::upload::merge_chunks))
         .route("/files", get(routes::upload::list_files))
         .route("/download/:filename", get(routes::upload::download_file))
+        .route("/server-info", get(routes::info::server_info))
         .route("/ws", get(routes::ws::ws_handler))
         .layer(cors)
         .with_state(state);

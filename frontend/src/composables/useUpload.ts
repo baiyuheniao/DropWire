@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import axios from 'axios'
 import { encryptFile } from './useCrypto'
 import { settings } from './useSettings'
+import { buildLanDownloadUrl, fetchServerInfo } from './useServerInfo'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB
 const CONCURRENCY = 3
@@ -65,13 +66,13 @@ async function uploadChunk(
   await axios.post('/upload/chunk', form)
 }
 
-function buildDownloadUrl(filename: string): string {
-  const encoded = encodeURIComponent(filename)
+async function buildDownloadUrl(filename: string): Promise<string> {
   const base = settings.value.apiBase.trim()
   if (base) {
-    return `${base.replace(/\/$/, '')}/download/${encoded}`
+    return buildLanDownloadUrl(filename, `${base.replace(/\/$/, '')}/download/`)
   }
-  return `${window.location.origin}/download/${encoded}`
+  const info = await fetchServerInfo()
+  return buildLanDownloadUrl(filename, info.download_url_prefix)
 }
 
 export function useUpload() {
@@ -147,11 +148,12 @@ export function useUpload() {
       const expiresAt = expiresInMinutes > 0
         ? Math.floor(Date.now() / 1000) + expiresInMinutes * 60
         : undefined
+      const downloadUrl = await buildDownloadUrl(finalFilename)
       setTask({
         ...tasks.value.get(uploadId)!,
         status: 'done',
         filename: finalFilename,
-        downloadUrl: buildDownloadUrl(finalFilename),
+        downloadUrl,
         expiresAt,
       })
     } catch (err) {

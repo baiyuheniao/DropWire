@@ -30,7 +30,13 @@
 
     <!-- Task list -->
     <TransitionGroup v-else name="task" tag="div" class="task-list">
-      <div v-for="[id, task] in tasks" :key="id" class="task-card" :class="task.status">
+      <div
+        v-for="[id, task] in tasks"
+        :key="id"
+        class="task-card"
+        :class="[task.status, { clickable: task.status === 'done' }]"
+        @click="task.status === 'done' && openDetail(task)"
+      >
         <div class="task-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
@@ -57,35 +63,29 @@
             <span>{{ pct(task) }}%</span>
           </div>
 
-          <div v-if="task.status === 'done' && task.downloadUrl" class="qr-area">
-            <div class="qr-code">
-              <QRCodeVue :value="task.downloadUrl" :size="128" level="M" />
-            </div>
-            <div class="qr-info">
-              <p class="qr-hint">扫码下载</p>
-              <p v-if="task.expiresAt" class="qr-expires">
-                有效期至 {{ formatExpireTime(task.expiresAt) }}
-              </p>
-              <p v-else class="qr-expires">永久有效</p>
-              <input :value="task.downloadUrl" readonly class="qr-url" />
-              <button class="copy-btn" @click.stop="copyUrl(task.downloadUrl, task.uploadId)">
-                {{ copiedId === task.uploadId ? '已复制' : '复制链接' }}
-              </button>
-            </div>
-          </div>
-
+          <p v-if="task.status === 'done'" class="detail-hint">点击打开详情页</p>
           <p v-if="task.error" class="error-msg">{{ task.error }}</p>
         </div>
       </div>
     </TransitionGroup>
+
+    <FileDetailModal
+      v-if="selectedTask"
+      :task="selectedTask"
+      :sender="props.options?.sender"
+      :receiver="props.options?.receiver"
+      :remark="props.options?.remark"
+      :encrypted="!!props.options?.password"
+      @close="selectedTask = null"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import QRCodeVue from 'qrcode.vue'
 import { useUpload, type UploadOptions, type UploadTask, type TaskStatus } from '../composables/useUpload'
 import { addHistory } from '../composables/useHistory'
+import FileDetailModal from './FileDetailModal.vue'
 
 const props = defineProps<{
   options?: UploadOptions
@@ -93,7 +93,7 @@ const props = defineProps<{
 
 const fileInput = ref<HTMLInputElement>()
 const isDragging = ref(false)
-const copiedId = ref<string>('')
+const selectedTask = ref<UploadTask | null>(null)
 const { tasks, uploadFile } = useUpload()
 
 const recordedIds = new Set<string>()
@@ -121,34 +121,8 @@ watch(
   { deep: true, immediate: true },
 )
 
-async function copyUrl(url?: string, uploadId?: string) {
-  if (!url) return
-  try {
-    await navigator.clipboard.writeText(url)
-  } catch {
-    const input = document.createElement('input')
-    input.value = url
-    document.body.appendChild(input)
-    input.select()
-    document.execCommand('copy')
-    document.body.removeChild(input)
-  }
-  if (uploadId) {
-    copiedId.value = uploadId
-    setTimeout(() => {
-      if (copiedId.value === uploadId) copiedId.value = ''
-    }, 2000)
-  }
-}
-
-function formatExpireTime(timestamp: number): string {
-  const date = new Date(timestamp * 1000)
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+function openDetail(task: UploadTask) {
+  selectedTask.value = task
 }
 
 function onDrop(e: DragEvent) {
@@ -290,6 +264,14 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   box-shadow: 0 2px 6px var(--shadow);
 }
 
+.task-card.clickable {
+  cursor: pointer;
+}
+
+.task-card.clickable:hover {
+  border-color: var(--primary);
+}
+
 .task-icon {
   flex-shrink: 0;
   width: 40px;
@@ -407,6 +389,12 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   line-height: 1.4;
 }
 
+.detail-hint {
+  font-size: 12px;
+  color: var(--primary-text);
+  margin-top: 6px;
+}
+
 /* Transition */
 .task-enter-active,
 .task-leave-active {
@@ -423,70 +411,4 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   transform: translateX(16px);
 }
 
-.qr-area {
-  display: flex;
-  gap: 14px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--border-color);
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.qr-code {
-  flex-shrink: 0;
-  width: 128px;
-  height: 128px;
-  border-radius: 10px;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid var(--border-color);
-}
-
-.qr-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.qr-hint {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.qr-expires {
-  font-size: 12px;
-  color: var(--text-tertiary);
-}
-
-.qr-url {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  font-size: 12px;
-  background: var(--bg-input);
-  color: var(--text-primary);
-  outline: none;
-}
-
-.copy-btn {
-  align-self: flex-start;
-  padding: 7px 14px;
-  background: var(--primary);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.copy-btn:hover {
-  background: var(--primary-hover);
-}
 </style>
