@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use serde::Serialize;
 
@@ -10,7 +10,7 @@ pub struct StoredUser {
     pub username: String,
     pub nickname: String,
     pub avatar: Option<String>,
-    pub password: String,
+    pub password_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,6 +34,8 @@ pub struct UploadProgress {
 pub struct UploadEntry {
     pub progress: UploadProgress,
     pub chunk_received: Vec<bool>,
+    /// SHA-256 hex of each chunk, validated on merge.
+    pub chunk_hashes: Vec<Option<String>>,
 }
 
 pub struct AppState {
@@ -42,6 +44,8 @@ pub struct AppState {
     pub progress_tx: broadcast::Sender<String>,
     pub discovery: DiscoveryState,
     pub users: Mutex<HashMap<String, StoredUser>>,
+    /// Maps bearer token to username.
+    pub sessions: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
@@ -51,8 +55,9 @@ impl AppState {
             uploads: Mutex::new(HashMap::new()),
             progress_tx: tx,
             users: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(HashMap::new()),
             discovery: DiscoveryState {
-                self_info: std::sync::Arc::new(Mutex::new(crate::discovery::DeviceInfo {
+                self_info: std::sync::Arc::new(std::sync::Mutex::new(crate::discovery::DeviceInfo {
                     id: String::new(),
                     name: String::new(),
                     avatar: None,
@@ -61,7 +66,7 @@ impl AppState {
                     last_seen: 0,
                     online: true,
                 })),
-                peers: std::sync::Arc::new(Mutex::new(HashMap::new())),
+                peers: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             },
         }
     }

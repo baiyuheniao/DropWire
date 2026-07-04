@@ -6,13 +6,15 @@ use axum::{
     Json,
 };
 use serde::Serialize;
-use std::path::PathBuf;
+use sha2::{Digest, Sha256};
+use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::models::{ApiResponse, FileMeta, MergeRequest};
+use crate::routes::auth_middleware::CurrentUser;
 use crate::state::{AppState, UploadEntry, UploadProgress, UploadStatus};
 
 const TEMP_DIR: &str = "./temp_chunks";
@@ -36,8 +38,6 @@ pub struct FileInfo {
     receiver: Option<String>,
     remark: Option<String>,
     encrypted: Option<bool>,
-    salt: Option<String>,
-    iv: Option<String>,
     expires_at: Option<u64>,
     hash_type: Option<String>,
     hash_value: Option<String>,
@@ -53,10 +53,32 @@ pub struct UploadStatusResponse {
     received_chunks: Vec<usize>,
 }
 
-fn build_relative_file_path(relative_path: Option<&str>, filename: &str) -> String {
+/// Sanitize a relative path by rejecting any `..` components.
+fn sanitize_relative_path(input: &str) -> Option<String> {
+    if input.is_empty() {
+        return Some(String::new());
+    }
+    let path = PathBuf::from(input);
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => return None,
+        }
+    }
+    Some(path.to_string_lossy().to_string())
+}
+
+fn build_relative_file_path(relative_path: Option<&str>, filename: &str) -> Option<String> {
+    let filename = sanitize_relative_path(filename)?;
+    if filename.is_empty() {
+        return None;
+    }
     match relative_path {
-        Some(rp) if !rp.is_empty() => format!("{}/{}", rp, filename),
-        _ => filename.to_string(),
+        Some(rp) if !rp.is_empty() => {
+            let rp = sanitize_relative_path(rp)?;
+            Some(format!("{}/{}", rp, filename))
+        }
+        _ => Some(filename),
     }
 }
 
@@ -108,6 +130,7 @@ async fn visit_dir(
     base: &std::path::Path,
     files: &mut Vec<FileInfo>,
     now: u64,
+    current_user: &str,
 ) -> Result<(), StatusCode> {
     let mut stack: Vec<PathBuf> = vec![dir.to_path_buf()];
 
@@ -150,6 +173,14 @@ async fn visit_dir(
                         continue;
                     }
                 }
+                // Server-side access control: users can only see files sent to
+                // them, sent by them, or public files without a receiver.
+                let is_sender = meta.sender.as_deref() == Some(current_user);
+                let is_receiver = meta.receiver.as_deref() == Some(current_user);
+                let is_public = meta.receiver.is_none();
+                if !is_sender && !is_receiver && !is_public {
+                    continue;
+                }
                 files.push(FileInfo {
                     filename,
                     relative_path: meta.relative_path.clone(),
@@ -159,8 +190,6 @@ async fn visit_dir(
                     receiver: meta.receiver,
                     remark: meta.remark,
                     encrypted: meta.encrypted,
-                    salt: meta.salt,
-                    iv: meta.iv,
                     expires_at: meta.expires_at,
                     hash_type: meta.hash_type.clone(),
                     hash_value: meta.hash_value.clone(),
@@ -174,13 +203,16 @@ async fn visit_dir(
     Ok(())
 }
 
-pub async fn list_files() -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode> {
+pub async fn list_files(
+    user: CurrentUser,
+) -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode> {
+    let current_user = user.username;
     let output_dir = PathBuf::from(OUTPUT_DIR);
     let mut files = Vec::new();
     let now = now_secs();
 
     if output_dir.exists() {
-        visit_dir(&output_dir, &output_dir, &mut files, now).await?;
+        visit_dir(&output_dir, &output_dir, &mut files, now, &current_user).await?;
     }
 
     files.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
@@ -192,25 +224,41 @@ pub async fn list_files() -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode
     }))
 }
 
-pub async fn download_file(
-    Path(filename): Path<String>,
-    headers: HeaderMap,
-) -> Result<Response, StatusCode> {
+fn resolve_output_path(filename: &str) -> Result<(PathBuf, PathBuf), StatusCode> {
     let output_dir = PathBuf::from(OUTPUT_DIR);
-    let file_path = output_dir.join(&filename);
+    let file_path = output_dir.join(filename);
 
-    // 防止目录遍历
     let canonical_output = output_dir
         .canonicalize()
         .unwrap_or_else(|_| output_dir.clone());
     let canonical_file = file_path
         .canonicalize()
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .unwrap_or_else(|_| file_path.clone());
     if !canonical_file.starts_with(&canonical_output) {
         return Err(StatusCode::FORBIDDEN);
     }
+    Ok((canonical_output, canonical_file))
+}
+
+pub async fn download_file(
+    Path(filename): Path<String>,
+    headers: HeaderMap,
+    user: CurrentUser,
+) -> Result<Response, StatusCode> {
+    let current_user = user.username;
+
+    let (_, canonical_file) = resolve_output_path(&filename)?;
 
     let meta = read_file_meta(&filename).await;
+
+    // Server-side access control for downloads.
+    let is_sender = meta.sender.as_deref() == Some(&current_user);
+    let is_receiver = meta.receiver.as_deref() == Some(&current_user);
+    let is_public = meta.receiver.is_none();
+    if !is_sender && !is_receiver && !is_public {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     if let Some(exp) = meta.expires_at {
         if exp > 0 && exp <= now_secs() {
             return Err(StatusCode::GONE);
@@ -228,7 +276,7 @@ pub async fn download_file(
         .unwrap_or(&filename);
     let disposition = format!("attachment; filename=\"{}\"", disposition_filename);
 
-    // 解析 Range 请求头，支持断点续传
+    // Parse Range header for resumable download.
     let (start, end) = if let Some(range_header) = headers.get(header::RANGE) {
         let range_str = range_header.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
         if let Some((s, e)) = parse_range(range_str, file_size) {
@@ -242,7 +290,6 @@ pub async fn download_file(
 
     let length = end - start + 1;
     let data = if length < file_size {
-        // 分片读取
         let mut file = fs::File::open(&canonical_file)
             .await
             .map_err(|_| StatusCode::NOT_FOUND)?;
@@ -266,12 +313,12 @@ pub async fn download_file(
         (
             StatusCode::PARTIAL_CONTENT,
             format!(
-                "bytes {}-{}/{}\r\naccept-ranges: bytes",
+                "content-range: bytes {}-{}/{}",
                 start, end, file_size
             ),
         )
     } else {
-        (StatusCode::OK, "bytes".to_string())
+        (StatusCode::OK, "accept-ranges: bytes".to_string())
     };
 
     let mut builder = Response::builder()
@@ -280,7 +327,6 @@ pub async fn download_file(
         .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CONTENT_LENGTH, length.to_string());
 
-    // 手动追加额外头（content-range / accept-ranges）
     for part in extra_headers.split("\r\n") {
         if let Some((name, value)) = part.split_once(": ") {
             builder = builder.header(name, value);
@@ -292,7 +338,7 @@ pub async fn download_file(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-/// 解析 `Range: bytes=start-end` 头，返回 (start, end) 字节偏移（含端点）。
+/// Parse a `Range: bytes=start-end` header, returning inclusive byte offsets.
 fn parse_range(range_str: &str, file_size: u64) -> Option<(u64, u64)> {
     let s = range_str.strip_prefix("bytes=")?;
     let (start_part, end_part) = s.split_once('-')?;
@@ -319,22 +365,22 @@ pub struct ReceivedRequest {
 
 pub async fn mark_file_received(
     State(state): State<Arc<AppState>>,
+    user: CurrentUser,
     Json(req): Json<ReceivedRequest>,
 ) -> Result<Json<ApiResponse<FileInfo>>, StatusCode> {
-    let output_dir = PathBuf::from(OUTPUT_DIR);
-    let file_path = output_dir.join(&req.filename);
+    let current_user = user.username;
 
-    let canonical_output = output_dir
-        .canonicalize()
-        .unwrap_or_else(|_| output_dir.clone());
-    let canonical_file = file_path
-        .canonicalize()
-        .map_err(|_| StatusCode::NOT_FOUND)?;
-    if !canonical_file.starts_with(&canonical_output) {
+    let (_, canonical_file) = resolve_output_path(&req.filename)?;
+
+    let mut meta = read_file_meta(&req.filename).await;
+
+    let is_sender = meta.sender.as_deref() == Some(&current_user);
+    let is_receiver = meta.receiver.as_deref() == Some(&current_user);
+    let is_public = meta.receiver.is_none();
+    if !is_sender && !is_receiver && !is_public {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let mut meta = read_file_meta(&req.filename).await;
     meta.received = true;
     meta.received_at = Some(now_secs());
     meta.received_by = req.received_by;
@@ -387,8 +433,6 @@ pub async fn mark_file_received(
             receiver: meta.receiver.clone(),
             remark: meta.remark.clone(),
             encrypted: meta.encrypted,
-            salt: meta.salt.clone(),
-            iv: meta.iv.clone(),
             expires_at: meta.expires_at,
             hash_type: meta.hash_type.clone(),
             hash_value: meta.hash_value.clone(),
@@ -408,7 +452,7 @@ pub async fn get_upload_status(
     // Prefer in-memory state for the filename, but also scan disk in case the
     // server was restarted while chunks were left in temp_chunks.
     let filename = {
-        let uploads = state.uploads.lock().unwrap();
+        let uploads = state.uploads.lock().await;
         uploads.get(&upload_id).map(|e| e.progress.filename.clone())
     };
 
@@ -451,12 +495,17 @@ pub async fn get_upload_status(
     }))
 }
 
-fn fail_upload(state: &AppState, upload_id: &str, reason: String) {
-    let mut uploads = state.uploads.lock().unwrap();
+async fn fail_upload(state: &AppState, upload_id: &str, reason: String) {
+    let mut uploads = state.uploads.lock().await;
     if let Some(entry) = uploads.get_mut(upload_id) {
         entry.progress.status = UploadStatus::Failed(reason);
         broadcast_progress(&state.progress_tx, &entry.progress);
     }
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(data))
 }
 
 pub async fn upload_chunk(
@@ -467,6 +516,7 @@ pub async fn upload_chunk(
     let mut filename = String::new();
     let mut chunk_index: usize = 0;
     let mut total_chunks: usize = 0;
+    let mut chunk_hash = String::new();
     let mut chunk_data: Vec<u8> = Vec::new();
 
     while let Some(field) = multipart
@@ -497,6 +547,9 @@ pub async fn upload_chunk(
                     .parse()
                     .map_err(|_| StatusCode::BAD_REQUEST)?
             }
+            "chunk_hash" => {
+                chunk_hash = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?
+            }
             "chunk" => {
                 chunk_data = field
                     .bytes()
@@ -512,9 +565,14 @@ pub async fn upload_chunk(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // Validate chunk hash if provided.
+    if !chunk_hash.is_empty() && chunk_hash != sha256_hex(&chunk_data) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let chunk_dir = PathBuf::from(TEMP_DIR).join(&upload_id);
     if let Err(e) = fs::create_dir_all(&chunk_dir).await {
-        fail_upload(&state, &upload_id, format!("create chunk dir failed: {e}"));
+        fail_upload(&state, &upload_id, format!("create chunk dir failed: {e}")).await;
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
@@ -522,17 +580,17 @@ pub async fn upload_chunk(
     let mut file = match fs::File::create(&chunk_path).await {
         Ok(f) => f,
         Err(e) => {
-            fail_upload(&state, &upload_id, format!("create chunk file failed: {e}"));
+            fail_upload(&state, &upload_id, format!("create chunk file failed: {e}")).await;
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
     if let Err(e) = file.write_all(&chunk_data).await {
-        fail_upload(&state, &upload_id, format!("write chunk failed: {e}"));
+        fail_upload(&state, &upload_id, format!("write chunk failed: {e}")).await;
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     let progress = {
-        let mut uploads = state.uploads.lock().unwrap();
+        let mut uploads = state.uploads.lock().await;
         let entry = uploads.entry(upload_id.clone()).or_insert_with(|| UploadEntry {
             progress: UploadProgress {
                 upload_id: upload_id.clone(),
@@ -542,9 +600,11 @@ pub async fn upload_chunk(
                 status: UploadStatus::Uploading,
             },
             chunk_received: vec![false; total_chunks],
+            chunk_hashes: vec![None; total_chunks],
         });
 
         entry.chunk_received[chunk_index] = true;
+        entry.chunk_hashes[chunk_index] = Some(chunk_hash.clone());
         entry.progress.received_chunks = entry.chunk_received.iter().filter(|&&x| x).count();
         entry.progress.clone()
     };
@@ -568,7 +628,7 @@ pub async fn merge_chunks(
     Json(req): Json<MergeRequest>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     {
-        let mut uploads = state.uploads.lock().unwrap();
+        let mut uploads = state.uploads.lock().await;
         if let Some(entry) = uploads.get_mut(&req.upload_id) {
             entry.progress.status = UploadStatus::Merging;
             broadcast_progress(&state.progress_tx, &entry.progress);
@@ -581,7 +641,8 @@ pub async fn merge_chunks(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let relative_file_path = build_relative_file_path(req.relative_path.as_deref(), &req.filename);
+    let relative_file_path = build_relative_file_path(req.relative_path.as_deref(), &req.filename)
+        .ok_or(StatusCode::BAD_REQUEST)?;
     let output_path = output_dir.join(&relative_file_path);
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)
@@ -589,26 +650,49 @@ pub async fn merge_chunks(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    let mut out = fs::File::create(&output_path)
-        .await
-        .map_err(|e| {
-            fail_upload(&state, &req.upload_id, format!("create output file failed: {e}"));
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Verify all chunks are present and hashes match before writing the output.
+    let chunk_hashes = {
+        let uploads = state.uploads.lock().await;
+        uploads
+            .get(&req.upload_id)
+            .map(|e| e.chunk_hashes.clone())
+            .unwrap_or_default()
+    };
 
+    let mut out = match fs::File::create(&output_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            fail_upload(&state, &req.upload_id, format!("create output file failed: {e}")).await;
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let mut hasher = Sha256::new();
     for i in 0..req.total_chunks {
         let chunk_path = chunk_dir.join(format!("{}.chunk", i));
         let data = match fs::read(&chunk_path).await {
             Ok(d) => d,
             Err(e) => {
-                fail_upload(&state, &req.upload_id, format!("missing chunk {}: {}", i, e));
+                fail_upload(&state, &req.upload_id, format!("missing chunk {}: {}", i, e)).await;
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
         };
+        if let Some(Some(expected)) = chunk_hashes.get(i) {
+            if !expected.is_empty() && sha256_hex(&data) != *expected {
+                fail_upload(
+                    &state,
+                    &req.upload_id,
+                    format!("chunk {} hash mismatch", i),
+                )
+                .await;
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
         if let Err(e) = out.write_all(&data).await {
-            fail_upload(&state, &req.upload_id, format!("merge write failed: {e}"));
+            fail_upload(&state, &req.upload_id, format!("merge write failed: {e}")).await;
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
+        hasher.update(&data);
     }
 
     let expires_at = req.expires_in_minutes.and_then(|mins| {
@@ -625,13 +709,16 @@ pub async fn merge_chunks(
         .filter(|s| !s.is_empty())
         .unwrap_or("sha256")
         .to_string();
-    let (hash_type, hash_value) = match fs::read(&output_path).await {
-        Ok(data) => match compute_file_hash(&data, &hash_type) {
-            Ok(hash) => (Some(hash_type), Some(hash)),
-            Err(_) => (None, None),
-        },
-        Err(_) => (None, None),
+
+    let hash_value = if hash_type.eq_ignore_ascii_case("sha-256") || hash_type.eq_ignore_ascii_case("sha256") {
+        Some(format!("{:x}", hasher.finalize()))
+    } else {
+        match fs::read(&output_path).await {
+            Ok(data) => compute_file_hash(&data, &hash_type).ok(),
+            Err(_) => None,
+        }
     };
+    let hash_type = hash_value.as_ref().map(|_| hash_type);
 
     let meta = FileMeta {
         sender: req.sender.clone(),
@@ -662,7 +749,7 @@ pub async fn merge_chunks(
     let _ = fs::remove_dir_all(&chunk_dir).await;
 
     {
-        let mut uploads = state.uploads.lock().unwrap();
+        let mut uploads = state.uploads.lock().await;
         if let Some(entry) = uploads.get_mut(&req.upload_id) {
             entry.progress.status = UploadStatus::Completed;
             broadcast_progress(&state.progress_tx, &entry.progress);

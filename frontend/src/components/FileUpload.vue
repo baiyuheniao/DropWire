@@ -100,14 +100,14 @@ const selectedTask = ref<UploadTask | null>(null)
 const { tasks, uploadFile } = useUpload()
 const { received } = useWebSocket('/ws')
 
-const recordedIds = new Set<string>()
+const recordedIds = ref<Set<string>>(new Set())
 
 watch(
   () => tasks.value,
   (next) => {
     next.forEach((task) => {
-      if (task.status === 'done' && !recordedIds.has(task.uploadId)) {
-        recordedIds.add(task.uploadId)
+      if (task.status === 'done' && !recordedIds.value.has(task.uploadId)) {
+        recordedIds.value.add(task.uploadId)
         addHistory({
           type: 'send',
           filename: task.filename,

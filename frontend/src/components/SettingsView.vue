@@ -108,7 +108,7 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { type User } from './AccountModal.vue'
+import { type User } from '../composables/useAuth'
 import { QR_VALIDITY_OPTIONS, settings, saveSettings, type ThemeMode } from '../composables/useSettings'
 import { requestNotificationPermission } from '../composables/useNotifications'
 

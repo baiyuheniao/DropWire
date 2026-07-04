@@ -49,13 +49,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocket } from './composables/useWebSocket'
 import { loadSettings, settings, type ThemeMode } from './composables/useSettings'
+import { loadUser, setUser, type User } from './composables/useAuth'
 import SendView from './components/SendView.vue'
 import ReceiveView from './components/ReceiveView.vue'
 import SettingsView from './components/SettingsView.vue'
-import AccountModal, { type User } from './components/AccountModal.vue'
+import AccountModal from './components/AccountModal.vue'
 
 loadSettings()
 
@@ -74,7 +75,8 @@ function applyTheme() {
 
 applyTheme()
 watch(() => settings.value.theme, applyTheme)
-mediaQuery.addEventListener('change', applyTheme)
+const onMediaChange = () => applyTheme()
+mediaQuery.addEventListener('change', onMediaChange)
 
 const wsUrl = computed(() => {
   const base = settings.value.apiBase.trim()
@@ -98,23 +100,18 @@ const user = ref<User | null>(null)
 
 function onUserUpdate(newUser: User | null) {
   user.value = newUser
+  setUser(newUser)
   if (newUser) {
     showAccountModal.value = false
-    localStorage.setItem('dropwire_current_user', JSON.stringify(newUser))
-  } else {
-    localStorage.removeItem('dropwire_current_user')
   }
 }
 
 onMounted(() => {
-  const saved = localStorage.getItem('dropwire_current_user')
-  if (saved) {
-    try {
-      user.value = JSON.parse(saved)
-    } catch {
-      user.value = null
-    }
-  }
+  user.value = loadUser()
+})
+
+onUnmounted(() => {
+  mediaQuery.removeEventListener('change', onMediaChange)
 })
 </script>
 

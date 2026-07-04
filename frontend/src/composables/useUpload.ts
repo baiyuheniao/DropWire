@@ -4,6 +4,7 @@ import { encryptFile } from './useCrypto'
 import { settings } from './useSettings'
 import { buildLanDownloadUrl, fetchServerInfo } from './useServerInfo'
 import { notify } from './useNotifications'
+import { computeHash } from './useHash'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB
 const CHUNK_CONCURRENCY = 3
@@ -11,6 +12,9 @@ const CHUNK_RETRIES = 3
 const FILE_CONCURRENCY = 2
 
 function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = Math.random() * 16 | 0
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
@@ -113,13 +117,22 @@ async function uploadChunk(
 ) {
   const start = index * CHUNK_SIZE
   const chunk = file.slice(start, start + CHUNK_SIZE)
+  const chunkBuffer = await chunk.arrayBuffer()
+  let chunkHash = ''
+  try {
+    chunkHash = await computeHash(chunkBuffer, 'sha-256')
+  } catch {
+    // Non-secure contexts lack crypto.subtle; leave hash empty and rely on
+    // transport-level integrity (HTTPS/TLS) or final file hash.
+  }
 
   const form = new FormData()
   form.append('upload_id', uploadId)
   form.append('filename', file.name)
   form.append('chunk_index', String(index))
   form.append('total_chunks', String(totalChunks))
-  form.append('chunk', chunk)
+  if (chunkHash) form.append('chunk_hash', chunkHash)
+  form.append('chunk', new Blob([chunkBuffer]))
   if (options?.sender) form.append('sender', options.sender)
   if (options?.receiver) form.append('receiver', options.receiver)
   if (options?.remark) form.append('remark', options.remark)

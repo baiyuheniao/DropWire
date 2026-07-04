@@ -1,11 +1,13 @@
 use axum::{
     Router,
     extract::DefaultBodyLimit,
+    http::Method,
+    middleware,
     routing::{get, post},
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 mod discovery;
 mod models;
@@ -24,6 +26,11 @@ async fn main() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(3000);
 
+    let allowed_origins: Vec<String> = std::env::var("ALLOWED_ORIGINS")
+        .ok()
+        .map(|s| s.split(',').map(|o| o.trim().to_string()).collect())
+        .unwrap_or_default();
+
     let discovery = init_discovery(port);
 
     let discovery_for_udp = discovery.clone();
@@ -38,12 +45,25 @@ async fn main() {
 
     let state = Arc::new(AppState::new().with_discovery(discovery));
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let allow_origin = if allowed_origins.is_empty() {
+        AllowOrigin::any()
+    } else {
+        let origins: Vec<_> = allowed_origins
+            .iter()
+            .map(|o| o.parse().expect("invalid ALLOWED_ORIGINS"))
+            .collect();
+        AllowOrigin::list(origins)
+    };
 
-    let app = Router::new()
+    let cors = CorsLayer::new()
+        .allow_origin(allow_origin)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ]);
+
+    let protected = Router::new()
         .route(
             "/upload/chunk",
             post(routes::upload::upload_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
@@ -53,13 +73,22 @@ async fn main() {
         .route("/files", get(routes::upload::list_files))
         .route("/files/received", post(routes::upload::mark_file_received))
         .route("/download/*path", get(routes::upload::download_file))
+        .route("/device", get(discovery::get_self_device).post(discovery::update_self_device))
+        .route("/devices", get(discovery::list_devices))
+        .route("/auth/profile", post(routes::auth::update_profile))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            routes::auth_middleware::require_auth,
+        ));
+
+    let public = Router::new()
         .route("/server-info", get(routes::info::server_info))
         .route("/auth/register", post(routes::auth::register))
         .route("/auth/login", post(routes::auth::login))
-        .route("/auth/profile", post(routes::auth::update_profile))
-        .route("/devices", get(discovery::list_devices))
-        .route("/device", get(discovery::get_self_device).post(discovery::update_self_device))
-        .route("/ws", get(routes::ws::ws_handler))
+        .route("/ws", get(routes::ws::ws_handler));
+
+    let app = protected
+        .merge(public)
         .layer(cors)
         .with_state(state);
 

@@ -217,7 +217,7 @@ pub async fn update_self_device(
     if let Some(avatar) = req.avatar {
         info.avatar = Some(avatar);
     }
-    save_self_info(&*info);
+    save_self_info(&info);
     Ok(Json(info.clone()))
 }
 

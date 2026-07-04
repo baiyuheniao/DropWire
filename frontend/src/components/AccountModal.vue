@@ -49,15 +49,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { settings } from '../composables/useSettings'
-
-export interface User {
-  username: string
-  nickname: string
-  avatar?: string
-}
+import { setUser, type User } from '../composables/useAuth'
 
 const props = withDefaults(defineProps<{
   modelValue?: boolean
@@ -109,18 +104,17 @@ function apiUrl(path: string): string {
   return `${base.replace(/\/$/, '')}${path}`
 }
 
-function persistUser(user: User | null) {
-  if (user) {
-    localStorage.setItem('dropwire_current_user', JSON.stringify(user))
-  } else {
-    localStorage.removeItem('dropwire_current_user')
-  }
-}
-
 function toggleMode() {
   mode.value = mode.value === 'login' ? 'register' : 'login'
   error.value = ''
 }
+
+function clearPassword() {
+  authForm.value.password = ''
+  authForm.value.confirmPassword = ''
+}
+
+onBeforeUnmount(clearPassword)
 
 async function handleAuth() {
   error.value = ''
@@ -141,14 +135,14 @@ async function handleAuth() {
       apiUrl(endpoint),
       { username, password, nickname: username, avatar: '' },
     )
-    if (!res.data.success) {
+    if (!res.data.success || !res.data.data) {
       error.value = res.data.message || '请求失败'
       return
     }
-    const user = res.data.data!
-    persistUser(user)
+    const user = res.data.data
+    setUser(user)
     emit('update:user', user)
-    authForm.value = { username: '', password: '', confirmPassword: '' }
+    clearPassword()
   } catch (err: any) {
     error.value = err?.response?.data?.message || '网络错误，请稍后重试'
   } finally {
@@ -161,17 +155,17 @@ async function saveProfile() {
   const { nickname, avatar } = editForm.value
   loading.value = true
   try {
-    const res = await axios.post<{ success: boolean; message: string; data?: User }>(
+    const res = await axios.post<{ success: boolean; message: string; data?: Omit<User, 'token'> }>(
       apiUrl('/auth/profile'),
       { username: props.user.username, nickname, avatar },
     )
-    if (!res.data.success) {
+    if (!res.data.success || !res.data.data) {
       error.value = res.data.message || '保存失败'
       return
     }
-    const user = res.data.data!
-    persistUser(user)
-    emit('update:user', user)
+    const updated = { ...props.user, ...res.data.data }
+    setUser(updated)
+    emit('update:user', updated)
   } catch (err: any) {
     error.value = err?.response?.data?.message || '网络错误'
   } finally {
@@ -180,7 +174,7 @@ async function saveProfile() {
 }
 
 function logout() {
-  persistUser(null)
+  setUser(null)
   emit('update:user', null)
 }
 </script>

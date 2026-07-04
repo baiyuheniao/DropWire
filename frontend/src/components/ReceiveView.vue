@@ -31,7 +31,7 @@
       </div>
 
       <ul v-else class="file-list">
-        <li v-for="file in filteredFiles" :key="filePath(file)" class="file-item">
+        <li v-for="file in filteredFiles" :key="`${filePath(file)}|${file.size}`" class="file-item">
           <div class="file-info">
             <div class="file-name" :title="filePath(file)">{{ file.filename }}</div>
             <div class="file-tags">
@@ -143,7 +143,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import axios from 'axios'
-import { type User } from './AccountModal.vue'
+import { type User } from '../composables/useAuth'
 import HistoryModal from './HistoryModal.vue'
 import { settings } from '../composables/useSettings'
 import { decryptFile } from '../composables/useCrypto'
