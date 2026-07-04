@@ -9,6 +9,13 @@ frontend/.pnpm-store/
 # 运行时产生的文件
 backend/temp_chunks/
 backend/uploads/
+backend/uploads_meta/
+device_*.json
+
+# 测试/临时文件
+test-crypto.mjs
+testfile.txt
+frontend/package-lock.json
 
 # 环境变量
 .env

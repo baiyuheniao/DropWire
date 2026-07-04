@@ -91,6 +91,14 @@
       </section>
 
       <section class="section">
+        <h3>通知</h3>
+        <label class="checkbox-row">
+          <input v-model="form.notificationsEnabled" type="checkbox" @change="saveNotifications" />
+          <span>启用系统通知（上传完成 / 收到新文件）</span>
+        </label>
+      </section>
+
+      <section class="section">
         <h3>关于</h3>
         <p class="hint">DropWire v0.1.0 · 局域网文件传输</p>
       </section>
@@ -102,6 +110,7 @@
 import { reactive, ref } from 'vue'
 import { type User } from './AccountModal.vue'
 import { QR_VALIDITY_OPTIONS, settings, saveSettings, type ThemeMode } from '../composables/useSettings'
+import { requestNotificationPermission } from '../composables/useNotifications'
 
 defineProps<{
   user: User | null
@@ -145,6 +154,13 @@ function saveRefresh() {
     autoRefresh: form.autoRefresh,
     refreshInterval: interval,
   })
+}
+
+function saveNotifications() {
+  saveSettings({ notificationsEnabled: form.notificationsEnabled })
+  if (form.notificationsEnabled) {
+    requestNotificationPermission()
+  }
 }
 </script>
 

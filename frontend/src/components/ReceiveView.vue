@@ -31,14 +31,15 @@
       </div>
 
       <ul v-else class="file-list">
-        <li v-for="file in filteredFiles" :key="file.filename" class="file-item">
+        <li v-for="file in filteredFiles" :key="filePath(file)" class="file-item">
           <div class="file-info">
-            <div class="file-name" :title="file.filename">{{ file.filename }}</div>
+            <div class="file-name" :title="filePath(file)">{{ file.filename }}</div>
             <div class="file-tags">
               <span v-if="file.encrypted" class="tag encrypted">🔒 加密</span>
               <span v-if="file.sender" class="tag sender">来自: {{ file.sender }}</span>
               <span v-if="file.receiver" class="tag receiver">发给: {{ file.receiver }}</span>
               <span v-if="file.remark" class="tag remark">备注: {{ file.remark }}</span>
+              <span v-if="file.received" class="tag confirmed">✓ 已接收</span>
             </div>
             <div class="file-meta">
               <span>{{ formatSize(file.size) }}</span>
@@ -49,7 +50,7 @@
           <div class="download-area">
             <template v-if="file.encrypted">
               <input
-                v-model="decryptPasswords[file.filename]"
+                v-model="decryptPasswords[filePath(file)]"
                 type="password"
                 class="decrypt-input"
                 placeholder="输入密码"
@@ -58,7 +59,7 @@
                 解密下载
               </button>
             </template>
-            <button v-else class="download-btn" @click="download(file.filename)">
+            <button v-else class="download-btn" @click="download(file)">
               下载
             </button>
           </div>
@@ -82,9 +83,13 @@ import HistoryModal from './HistoryModal.vue'
 import { settings } from '../composables/useSettings'
 import { decryptFile } from '../composables/useCrypto'
 import { addHistory } from '../composables/useHistory'
+import { selfDevice, fetchSelfDevice } from '../composables/useDevices'
+import { notify, requestNotificationPermission } from '../composables/useNotifications'
+import { useWebSocket } from '../composables/useWebSocket'
 
 interface FileInfo {
   filename: string
+  relative_path?: string
   size: number
   modified_at?: number
   sender?: string
@@ -93,6 +98,16 @@ interface FileInfo {
   encrypted?: boolean
   salt?: string
   iv?: string
+  received?: boolean
+  received_at?: number
+  received_by?: string
+}
+
+function filePath(file: FileInfo): string {
+  if (file.relative_path) {
+    return `${file.relative_path}/${file.filename}`
+  }
+  return file.filename
 }
 
 const props = defineProps<{
@@ -104,12 +119,37 @@ const loading = ref(false)
 const error = ref('')
 const showHistory = ref(false)
 const decryptPasswords = reactive<Record<string, string>>({})
+const knownFilenames = ref<Set<string>>(new Set())
+
+const selfDeviceId = computed(() => selfDevice.value?.id || props.user?.username || '')
+
+const wsUrl = computed(() => {
+  const base = settings.value.apiBase.trim()
+  if (!base) return '/ws'
+  return base.replace(/^http/, 'ws') + '/ws'
+})
+const { received } = useWebSocket(wsUrl.value)
+
+watch(
+  () => received.value,
+  (next) => {
+    next.forEach((evt) => {
+      const file = files.value.find((f) => filePath(f) === evt.filename)
+      if (file) {
+        file.received = true
+        file.received_at = evt.received_at
+        file.received_by = evt.received_by
+      }
+    })
+  },
+  { deep: true },
+)
 
 const filteredFiles = computed(() => {
-  if (!props.user) {
-    return files.value.filter((f) => !f.receiver)
-  }
-  return files.value.filter((f) => !f.receiver || f.receiver === props.user!.username)
+  return files.value.filter((f) => {
+    if (!f.receiver) return true
+    return f.receiver === selfDeviceId.value || f.receiver === props.user?.username
+  })
 })
 
 async function fetchFiles() {
@@ -118,7 +158,15 @@ async function fetchFiles() {
   try {
     const res = await axios.get('/files')
     if (res.data.success) {
-      files.value = res.data.data || []
+      const next = (res.data.data || []) as FileInfo[]
+      if (settings.value.notificationsEnabled && knownFilenames.value.size > 0) {
+        const newFiles = next.filter((f) => !knownFilenames.value.has(filePath(f)))
+        for (const f of newFiles.slice(0, 3)) {
+          notify('收到新文件', { body: filePath(f) })
+        }
+      }
+      knownFilenames.value = new Set(next.map((f) => filePath(f)))
+      files.value = next
     } else {
       error.value = res.data.message || '获取文件列表失败'
     }
@@ -140,14 +188,33 @@ function triggerDownload(blob: Blob, filename: string) {
   window.URL.revokeObjectURL(url)
 }
 
-async function download(filename: string) {
+async function markReceived(path: string) {
   try {
-    const res = await axios.get(`/download/${encodeURIComponent(filename)}`, {
+    await axios.post('/files/received', {
+      filename: path,
+      received_by: selfDeviceId.value || undefined,
+    })
+    const file = files.value.find((f) => filePath(f) === path)
+    if (file) {
+      file.received = true
+      file.received_at = Math.floor(Date.now() / 1000)
+      file.received_by = selfDeviceId.value
+    }
+  } catch (err: any) {
+    // Non-blocking: the receiver can still use the file.
+    console.warn('标记已接收失败', err)
+  }
+}
+
+async function download(file: FileInfo) {
+  const path = filePath(file)
+  try {
+    const res = await axios.get(`/download/${encodeURIComponent(path)}`, {
       responseType: 'blob',
     })
-    triggerDownload(new Blob([res.data]), filename)
-    const file = files.value.find((f) => f.filename === filename)
-    recordReceive(file ?? { filename, size: Number(res.headers['content-length']) || 0 })
+    triggerDownload(new Blob([res.data]), file.filename)
+    recordReceive({ ...file, filename: path })
+    markReceived(path)
   } catch (err: any) {
     error.value = err?.response?.data?.message || '下载失败'
   }
@@ -155,7 +222,8 @@ async function download(filename: string) {
 
 async function downloadDecrypted(file: FileInfo) {
   error.value = ''
-  const password = decryptPasswords[file.filename]
+  const path = filePath(file)
+  const password = decryptPasswords[path]
   if (!password) {
     error.value = '请输入解密密码'
     return
@@ -165,12 +233,13 @@ async function downloadDecrypted(file: FileInfo) {
     return
   }
   try {
-    const res = await axios.get(`/download/${encodeURIComponent(file.filename)}`, {
+    const res = await axios.get(`/download/${encodeURIComponent(path)}`, {
       responseType: 'arraybuffer',
     })
     const plaintext = await decryptFile(res.data, password, file.salt, file.iv)
     triggerDownload(new Blob([plaintext]), file.filename)
-    recordReceive(file)
+    recordReceive({ ...file, filename: path })
+    markReceived(path)
   } catch (err: any) {
     error.value = '解密失败：密码错误或文件损坏'
   }
@@ -230,8 +299,12 @@ watch(
 )
 
 onMounted(() => {
+  fetchSelfDevice()
   fetchFiles()
   startAutoRefresh()
+  if (settings.value.notificationsEnabled) {
+    requestNotificationPermission()
+  }
 })
 
 onUnmounted(stopAutoRefresh)
@@ -421,6 +494,11 @@ onUnmounted(stopAutoRefresh)
 .tag.encrypted {
   background: var(--warning-bg);
   color: var(--warning-text);
+}
+
+.tag.confirmed {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--success-text);
 }
 
 .file-meta {

@@ -8,9 +8,16 @@ export interface UploadProgress {
   status: 'Uploading' | 'Merging' | 'Completed' | { type: 'Failed'; reason: string }
 }
 
+export interface ReceivedEvent {
+  filename: string
+  received_at?: number
+  received_by?: string
+}
+
 // Singleton so App.vue and FileUpload.vue share the same connection.
 let ws: WebSocket | null = null
 const progress = ref<Map<string, UploadProgress>>(new Map())
+const received = ref<Map<string, ReceivedEvent>>(new Map())
 const connected = ref(false)
 let refCount = 0
 
@@ -21,8 +28,14 @@ function connect(url: string) {
 
   ws.onmessage = (e) => {
     try {
-      const data: UploadProgress = JSON.parse(e.data)
-      progress.value = new Map(progress.value).set(data.upload_id, data)
+      const payload = JSON.parse(e.data)
+      if (payload.event === 'progress' && payload.data) {
+        const data: UploadProgress = payload.data
+        progress.value = new Map(progress.value).set(data.upload_id, data)
+      } else if (payload.event === 'received' && payload.data) {
+        const data: ReceivedEvent = payload.data
+        received.value = new Map(received.value).set(data.filename, data)
+      }
     } catch { /* ignore malformed frames */ }
   }
 
@@ -46,5 +59,5 @@ export function useWebSocket(url: string) {
     }
   })
 
-  return { progress, connected }
+  return { progress, connected, received }
 }

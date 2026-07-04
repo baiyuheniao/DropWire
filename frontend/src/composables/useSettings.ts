@@ -9,6 +9,7 @@ export interface AppSettings {
   refreshInterval: number
   theme: ThemeMode
   qrValidityMinutes: number
+  notificationsEnabled: boolean
 }
 
 export interface QrValidityOption {
@@ -32,6 +33,7 @@ const defaultSettings: AppSettings = {
   refreshInterval: 10,
   theme: 'system',
   qrValidityMinutes: 60,
+  notificationsEnabled: true,
 }
 
 export const settings = ref<AppSettings>({ ...defaultSettings })

@@ -50,6 +50,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import axios from 'axios'
+import { settings } from '../composables/useSettings'
 
 export interface User {
   username: string
@@ -72,6 +74,7 @@ const emit = defineEmits<{
 const isLoggedIn = computed(() => !!props.user)
 const mode = ref<'login' | 'register'>('login')
 const error = ref('')
+const loading = ref(false)
 
 const title = computed(() => {
   if (isLoggedIn.value) return '编辑账户'
@@ -100,12 +103,26 @@ watch(
   { immediate: true }
 )
 
+function apiUrl(path: string): string {
+  const base = settings.value.apiBase.trim()
+  if (!base) return path
+  return `${base.replace(/\/$/, '')}${path}`
+}
+
+function persistUser(user: User | null) {
+  if (user) {
+    localStorage.setItem('dropwire_current_user', JSON.stringify(user))
+  } else {
+    localStorage.removeItem('dropwire_current_user')
+  }
+}
+
 function toggleMode() {
   mode.value = mode.value === 'login' ? 'register' : 'login'
   error.value = ''
 }
 
-function handleAuth() {
+async function handleAuth() {
   error.value = ''
   const { username, password, confirmPassword } = authForm.value
   if (!username || !password) {
@@ -117,52 +134,53 @@ function handleAuth() {
     return
   }
 
-  // 前端本地模拟登录/注册
-  const existing = localStorage.getItem(`dropwire_user_${username}`)
-  if (mode.value === 'login') {
-    if (!existing) {
-      error.value = '用户不存在'
+  loading.value = true
+  try {
+    const endpoint = mode.value === 'login' ? '/auth/login' : '/auth/register'
+    const res = await axios.post<{ success: boolean; message: string; data?: User }>(
+      apiUrl(endpoint),
+      { username, password, nickname: username, avatar: '' },
+    )
+    if (!res.data.success) {
+      error.value = res.data.message || '请求失败'
       return
     }
-    const stored = JSON.parse(existing) as User & { password: string }
-    if (stored.password !== password) {
-      error.value = '密码错误'
-      return
-    }
-    emit('update:user', { username, nickname: stored.nickname, avatar: stored.avatar })
-  } else {
-    if (existing) {
-      error.value = '用户已存在'
-      return
-    }
-    const newUser: User & { password: string } = {
-      username,
-      nickname: username,
-      avatar: '',
-      password,
-    }
-    localStorage.setItem(`dropwire_user_${username}`, JSON.stringify(newUser))
-    emit('update:user', { username, nickname: username, avatar: '' })
+    const user = res.data.data!
+    persistUser(user)
+    emit('update:user', user)
+    authForm.value = { username: '', password: '', confirmPassword: '' }
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || '网络错误，请稍后重试'
+  } finally {
+    loading.value = false
   }
-
-  authForm.value = { username: '', password: '', confirmPassword: '' }
 }
 
-function saveProfile() {
+async function saveProfile() {
   if (!props.user) return
   const { nickname, avatar } = editForm.value
-  const key = `dropwire_user_${props.user.username}`
-  const stored = localStorage.getItem(key)
-  if (stored) {
-    const data = JSON.parse(stored)
-    data.nickname = nickname
-    data.avatar = avatar
-    localStorage.setItem(key, JSON.stringify(data))
+  loading.value = true
+  try {
+    const res = await axios.post<{ success: boolean; message: string; data?: User }>(
+      apiUrl('/auth/profile'),
+      { username: props.user.username, nickname, avatar },
+    )
+    if (!res.data.success) {
+      error.value = res.data.message || '保存失败'
+      return
+    }
+    const user = res.data.data!
+    persistUser(user)
+    emit('update:user', user)
+  } catch (err: any) {
+    error.value = err?.response?.data?.message || '网络错误'
+  } finally {
+    loading.value = false
   }
-  emit('update:user', { ...props.user, nickname, avatar })
 }
 
 function logout() {
+  persistUser(null)
   emit('update:user', null)
 }
 </script>

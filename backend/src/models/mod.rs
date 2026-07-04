@@ -12,6 +12,7 @@ pub struct ApiResponse<T: Serialize> {
 pub struct MergeRequest {
     pub upload_id: String,
     pub filename: String,
+    pub relative_path: Option<String>,
     pub total_chunks: usize,
     pub sender: Option<String>,
     pub receiver: Option<String>,
@@ -27,8 +28,12 @@ pub struct FileMeta {
     pub sender: Option<String>,
     pub receiver: Option<String>,
     pub remark: Option<String>,
+    pub relative_path: Option<String>,
     pub encrypted: Option<bool>,
     pub salt: Option<String>,
     pub iv: Option<String>,
     pub expires_at: Option<u64>,
+    pub received: bool,
+    pub received_at: Option<u64>,
+    pub received_by: Option<String>,
 }

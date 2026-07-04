@@ -11,28 +11,9 @@
       </button>
     </div>
 
-    <div class="send-options">
-      <div class="option-group">
-        <label>发送对象</label>
-        <div class="receiver-field">
-          <select v-model="receiverMode" class="receiver-select">
-            <option value="">全局发送</option>
-            <option v-for="u in knownUsers" :key="u.username" :value="u.username">
-              {{ u.nickname || u.username }}
-            </option>
-            <option value="__custom__">指定用户...</option>
-          </select>
-          <input
-            v-if="receiverMode === '__custom__'"
-            v-model="customReceiver"
-            type="text"
-            class="custom-receiver"
-            placeholder="输入接收者用户名"
-            maxlength="32"
-          />
-        </div>
-      </div>
+    <DeviceList v-model="selectedDevice" />
 
+    <div class="send-options">
       <div class="option-group">
         <label>备注</label>
         <input
@@ -74,53 +55,35 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import FileUpload from './FileUpload.vue'
 import HistoryModal from './HistoryModal.vue'
+import DeviceList from './DeviceList.vue'
 import { type User } from './AccountModal.vue'
+import { selfDevice } from '../composables/useDevices'
+import type { DeviceInfo } from '../composables/useDevices'
 
 const props = defineProps<{
   user: User | null
 }>()
 
-const receiverMode = ref('')
-const customReceiver = ref('')
+const selectedDevice = ref<DeviceInfo | null>(null)
 const remark = ref('')
 const enableEncryption = ref(false)
 const password = ref('')
-const knownUsers = ref<User[]>([])
 const showHistory = ref(false)
 
-onMounted(() => {
-  const users: User[] = []
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (key?.startsWith('dropwire_user_')) {
-      try {
-        const data = JSON.parse(localStorage.getItem(key) || '{}')
-        if (data.username) {
-          users.push({
-            username: data.username,
-            nickname: data.nickname || data.username,
-            avatar: data.avatar,
-          })
-        }
-      } catch {
-        // ignore invalid entries
-      }
-    }
+const targetUrl = computed(() => {
+  if (selectedDevice.value) {
+    return `http://${selectedDevice.value.ip}:${selectedDevice.value.port}`
   }
-  knownUsers.value = users
-})
-
-const effectiveReceiver = computed(() => {
-  if (receiverMode.value === '__custom__') return customReceiver.value.trim()
-  return receiverMode.value
+  return undefined
 })
 
 const uploadOptions = computed(() => ({
-  sender: props.user?.nickname || props.user?.username || undefined,
-  receiver: effectiveReceiver.value || undefined,
+  sender: props.user?.nickname || props.user?.username || selfDevice.value?.name || undefined,
+  receiver: selectedDevice.value?.id || undefined,
+  targetUrl: targetUrl.value,
   remark: remark.value.trim() || undefined,
   password: enableEncryption.value ? password.value : undefined,
 }))
@@ -188,15 +151,6 @@ const uploadOptions = computed(() => ({
   color: var(--text-secondary);
 }
 
-.receiver-field {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.receiver-select,
-.custom-receiver,
 .remark-input {
   padding: 10px 12px;
   border: 1px solid var(--border-strong);
@@ -208,22 +162,9 @@ const uploadOptions = computed(() => ({
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.receiver-select:focus,
-.custom-receiver:focus,
 .remark-input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-}
-
-.receiver-select {
-  min-width: 160px;
-  background: var(--bg-input);
-}
-
-.custom-receiver,
-.remark-input {
-  flex: 1;
-  min-width: 0;
 }
 
 .checkbox-label {
