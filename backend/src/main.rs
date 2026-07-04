@@ -52,7 +52,7 @@ async fn main() {
         .route("/upload/merge", post(routes::upload::merge_chunks))
         .route("/files", get(routes::upload::list_files))
         .route("/files/received", post(routes::upload::mark_file_received))
-        .route("/download/{*filename}", get(routes::upload::download_file))
+        .route("/download/*path", get(routes::upload::download_file))
         .route("/server-info", get(routes::info::server_info))
         .route("/auth/register", post(routes::auth::register))
         .route("/auth/login", post(routes::auth::login))

@@ -48,7 +48,44 @@
           </div>
 
           <div class="download-area">
-            <template v-if="file.encrypted">
+            <!-- 下载中 / 暂停 / 完成：显示进度条 + 控制按钮 -->
+            <div
+              v-if="downloadTasks[filePath(file)]"
+              class="download-progress-wrapper"
+            >
+              <div class="download-progress-track">
+                <div
+                  class="download-progress-bar"
+                  :class="downloadTasks[filePath(file)].status"
+                  :style="{ width: downloadPct(filePath(file)) + '%' }"
+                />
+              </div>
+              <span class="download-progress-text">{{ downloadPct(filePath(file)) }}%</span>
+              <button
+                v-if="downloadTasks[filePath(file)].status === 'downloading'"
+                class="pause-btn"
+                @click="pauseDownload(filePath(file))"
+              >
+                暂停
+              </button>
+              <button
+                v-if="downloadTasks[filePath(file)].status === 'paused'"
+                class="resume-btn"
+                @click="resumeDownload(file)"
+              >
+                继续
+              </button>
+              <button
+                v-if="downloadTasks[filePath(file)].status === 'error'"
+                class="resume-btn"
+                @click="resumeDownload(file)"
+              >
+                重试
+              </button>
+            </div>
+
+            <!-- 初始下载按钮 -->
+            <template v-else-if="file.encrypted">
               <input
                 v-model="decryptPasswords[filePath(file)]"
                 type="password"
@@ -115,6 +152,12 @@ import { selfDevice, fetchSelfDevice } from '../composables/useDevices'
 import { notify, requestNotificationPermission } from '../composables/useNotifications'
 import { useWebSocket } from '../composables/useWebSocket'
 import { HASH_ALGORITHMS, computeHash, normalizeHashType } from '../composables/useHash'
+import {
+  useDownload,
+  startDownload,
+  pauseDownload as pauseDownloadTask,
+  getDownloadProgress,
+} from '../composables/useDownload'
 
 interface FileInfo {
   filename: string
@@ -152,6 +195,7 @@ const showHistory = ref(false)
 const decryptPasswords = reactive<Record<string, string>>({})
 const knownFilenames = ref<Set<string>>(new Set())
 const downloadedBuffers = reactive<Record<string, ArrayBuffer>>({})
+const { tasks: downloadTasks } = useDownload()
 const verifyState = reactive<
   Record<string, {
     algorithm: string
@@ -277,18 +321,16 @@ async function markReceived(path: string) {
 
 async function download(file: FileInfo) {
   const path = filePath(file)
+  const url = `/download/${encodeURIComponent(path)}`
   try {
-    const res = await axios.get(`/download/${encodeURIComponent(path)}`, {
-      responseType: 'blob',
-    })
-    const blob = new Blob([res.data])
-    const buffer = await blob.arrayBuffer()
+    const buffer = await startDownload(path, file.filename, file.size, url)
     downloadedBuffers[path] = buffer
-    triggerDownload(blob, file.filename)
+    triggerDownload(new Blob([buffer]), file.filename)
     recordReceive({ ...file, filename: path })
     markReceived(path)
     await runVerify(file, buffer)
   } catch (err: any) {
+    if (downloadTasks[path]?.status === 'paused') return // 用户主动暂停，不报错
     error.value = err?.response?.data?.message || '下载失败'
   }
 }
@@ -305,19 +347,39 @@ async function downloadDecrypted(file: FileInfo) {
     error.value = '缺少加密参数，无法解密'
     return
   }
+  const url = `/download/${encodeURIComponent(path)}`
   try {
-    const res = await axios.get(`/download/${encodeURIComponent(path)}`, {
-      responseType: 'arraybuffer',
-    })
-    const plaintext = await decryptFile(res.data, password, file.salt, file.iv)
+    const ciphertext = await startDownload(path, file.filename, file.size, url)
+    const plaintext = await decryptFile(ciphertext, password, file.salt, file.iv)
     downloadedBuffers[path] = plaintext
     triggerDownload(new Blob([plaintext]), file.filename)
     recordReceive({ ...file, filename: path })
     markReceived(path)
     await runVerify(file, plaintext)
   } catch (err: any) {
+    if (downloadTasks[path]?.status === 'paused') return
     error.value = '解密失败：密码错误或文件损坏'
   }
+}
+
+/** 暂停下载 */
+function pauseDownload(path: string) {
+  pauseDownloadTask(path)
+}
+
+/** 继续 / 重试下载 */
+function resumeDownload(file: FileInfo) {
+  // startDownload 内部会处理 paused -> downloading 的状态转换
+  if (file.encrypted) {
+    downloadDecrypted(file)
+  } else {
+    download(file)
+  }
+}
+
+/** 下载进度百分比 */
+function downloadPct(path: string): number {
+  return getDownloadProgress(path)
 }
 
 function recordReceive(file: { filename: string; size: number; sender?: string; receiver?: string; remark?: string; encrypted?: boolean }) {
@@ -632,6 +694,71 @@ onUnmounted(stopAutoRefresh)
 
 .download-btn:hover {
   background: var(--primary-hover);
+}
+
+.download-progress-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.download-progress-track {
+  flex: 1;
+  height: 8px;
+  background: var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.download-progress-bar {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--primary), var(--primary-hover));
+  transition: width 0.3s ease;
+}
+
+.download-progress-bar.paused {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.download-progress-bar.error {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+.download-progress-bar.done {
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+}
+
+.download-progress-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 36px;
+  text-align: right;
+}
+
+.pause-btn,
+.resume-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+
+.pause-btn:hover {
+  border-color: #f59e0b;
+  color: #b45309;
+}
+
+.resume-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .verify-area {

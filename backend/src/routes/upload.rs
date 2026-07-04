@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{Multipart, Path, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::Response,
     Json,
 };
@@ -192,7 +192,10 @@ pub async fn list_files() -> Result<Json<ApiResponse<Vec<FileInfo>>>, StatusCode
     }))
 }
 
-pub async fn download_file(Path(filename): Path<String>) -> Result<Response, StatusCode> {
+pub async fn download_file(
+    Path(filename): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
     let output_dir = PathBuf::from(OUTPUT_DIR);
     let file_path = output_dir.join(&filename);
 
@@ -214,9 +217,10 @@ pub async fn download_file(Path(filename): Path<String>) -> Result<Response, Sta
         }
     }
 
-    let data = fs::read(&canonical_file)
+    let metadata = fs::metadata(&canonical_file)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
+    let file_size = metadata.len();
 
     let disposition_filename = std::path::Path::new(&filename)
         .file_name()
@@ -224,12 +228,87 @@ pub async fn download_file(Path(filename): Path<String>) -> Result<Response, Sta
         .unwrap_or(&filename);
     let disposition = format!("attachment; filename=\"{}\"", disposition_filename);
 
-    Ok(Response::builder()
-        .status(StatusCode::OK)
+    // 解析 Range 请求头，支持断点续传
+    let (start, end) = if let Some(range_header) = headers.get(header::RANGE) {
+        let range_str = range_header.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
+        if let Some((s, e)) = parse_range(range_str, file_size) {
+            (s, e)
+        } else {
+            return Err(StatusCode::RANGE_NOT_SATISFIABLE);
+        }
+    } else {
+        (0, file_size.saturating_sub(1))
+    };
+
+    let length = end - start + 1;
+    let data = if length < file_size {
+        // 分片读取
+        let mut file = fs::File::open(&canonical_file)
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?;
+        use tokio::io::AsyncSeekExt;
+        file.seek(std::io::SeekFrom::Start(start))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut buf = vec![0u8; length as usize];
+        use tokio::io::AsyncReadExt;
+        file.read_exact(&mut buf)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        buf
+    } else {
+        fs::read(&canonical_file)
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?
+    };
+
+    let (status, extra_headers) = if length < file_size {
+        (
+            StatusCode::PARTIAL_CONTENT,
+            format!(
+                "bytes {}-{}/{}\r\naccept-ranges: bytes",
+                start, end, file_size
+            ),
+        )
+    } else {
+        (StatusCode::OK, "bytes".to_string())
+    };
+
+    let mut builder = Response::builder()
+        .status(status)
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .header(header::CONTENT_DISPOSITION, disposition)
+        .header(header::CONTENT_LENGTH, length.to_string());
+
+    // 手动追加额外头（content-range / accept-ranges）
+    for part in extra_headers.split("\r\n") {
+        if let Some((name, value)) = part.split_once(": ") {
+            builder = builder.header(name, value);
+        }
+    }
+
+    builder
         .body(Body::from(data))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// 解析 `Range: bytes=start-end` 头，返回 (start, end) 字节偏移（含端点）。
+fn parse_range(range_str: &str, file_size: u64) -> Option<(u64, u64)> {
+    let s = range_str.strip_prefix("bytes=")?;
+    let (start_part, end_part) = s.split_once('-')?;
+
+    let start: u64 = start_part.trim().parse().ok()?;
+    let end: u64 = if end_part.trim().is_empty() {
+        file_size.saturating_sub(1)
+    } else {
+        end_part.trim().parse().ok()?
+    };
+
+    if start > end || start >= file_size {
+        return None;
+    }
+    let end = end.min(file_size.saturating_sub(1));
+    Some((start, end))
 }
 
 #[derive(Debug, serde::Deserialize)]
