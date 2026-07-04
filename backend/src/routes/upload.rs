@@ -39,6 +39,8 @@ pub struct FileInfo {
     salt: Option<String>,
     iv: Option<String>,
     expires_at: Option<u64>,
+    hash_type: Option<String>,
+    hash_value: Option<String>,
     received: bool,
     received_at: Option<u64>,
     received_by: Option<String>,
@@ -55,6 +57,37 @@ fn build_relative_file_path(relative_path: Option<&str>, filename: &str) -> Stri
     match relative_path {
         Some(rp) if !rp.is_empty() => format!("{}/{}", rp, filename),
         _ => filename.to_string(),
+    }
+}
+
+fn compute_file_hash(data: &[u8], hash_type: &str) -> Result<String, StatusCode> {
+    match hash_type.to_ascii_lowercase().as_str() {
+        "md5" => {
+            use md5::Digest;
+            Ok(format!("{:x}", md5::Md5::digest(data)))
+        }
+        "sha-1" | "sha1" => {
+            use sha1::Digest;
+            Ok(format!("{:x}", sha1::Sha1::digest(data)))
+        }
+        "sha-256" | "sha256" => {
+            use sha2::{Digest, Sha256};
+            Ok(format!("{:x}", Sha256::digest(data)))
+        }
+        "sha-384" | "sha384" => {
+            use sha2::{Digest, Sha384};
+            Ok(format!("{:x}", Sha384::digest(data)))
+        }
+        "sha-512" | "sha512" => {
+            use sha2::{Digest, Sha512};
+            Ok(format!("{:x}", Sha512::digest(data)))
+        }
+        "crc32" => {
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(data);
+            Ok(format!("{:08x}", hasher.finalize()))
+        }
+        _ => Err(StatusCode::BAD_REQUEST),
     }
 }
 
@@ -129,6 +162,8 @@ async fn visit_dir(
                     salt: meta.salt,
                     iv: meta.iv,
                     expires_at: meta.expires_at,
+                    hash_type: meta.hash_type.clone(),
+                    hash_value: meta.hash_value.clone(),
                     received: meta.received,
                     received_at: meta.received_at,
                     received_by: meta.received_by,
@@ -276,6 +311,8 @@ pub async fn mark_file_received(
             salt: meta.salt.clone(),
             iv: meta.iv.clone(),
             expires_at: meta.expires_at,
+            hash_type: meta.hash_type.clone(),
+            hash_value: meta.hash_value.clone(),
             received: meta.received,
             received_at: meta.received_at,
             received_by: meta.received_by.clone(),
@@ -503,6 +540,20 @@ pub async fn merge_chunks(
         }
     });
 
+    let hash_type = req
+        .hash_type
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("sha256")
+        .to_string();
+    let (hash_type, hash_value) = match fs::read(&output_path).await {
+        Ok(data) => match compute_file_hash(&data, &hash_type) {
+            Ok(hash) => (Some(hash_type), Some(hash)),
+            Err(_) => (None, None),
+        },
+        Err(_) => (None, None),
+    };
+
     let meta = FileMeta {
         sender: req.sender.clone(),
         receiver: req.receiver.clone(),
@@ -512,6 +563,8 @@ pub async fn merge_chunks(
         salt: req.salt.clone(),
         iv: req.iv.clone(),
         expires_at,
+        hash_type,
+        hash_value,
         ..Default::default()
     };
     let meta_path = meta_path_for(&relative_file_path);

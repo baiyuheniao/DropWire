@@ -63,6 +63,34 @@
               下载
             </button>
           </div>
+
+          <div class="verify-area">
+            <select v-model="getVerifyState(file).algorithm" class="verify-select">
+              <option v-for="alg in HASH_ALGORITHMS" :key="alg.value" :value="alg.value">
+                {{ alg.label }}
+              </option>
+            </select>
+            <input
+              v-model="getVerifyState(file).expected"
+              type="text"
+              class="verify-input"
+              placeholder="预期校验值"
+            />
+            <button
+              class="verify-btn"
+              :disabled="!downloadedBuffers[filePath(file)]"
+              @click="runVerify(file, downloadedBuffers[filePath(file)])"
+            >
+              校验
+            </button>
+            <span
+              v-if="getVerifyState(file).result"
+              class="verify-result"
+              :class="getVerifyState(file).result"
+            >
+              {{ verifyLabel(getVerifyState(file).result) }}
+            </span>
+          </div>
         </li>
       </ul>
     </div>
@@ -86,6 +114,7 @@ import { addHistory } from '../composables/useHistory'
 import { selfDevice, fetchSelfDevice } from '../composables/useDevices'
 import { notify, requestNotificationPermission } from '../composables/useNotifications'
 import { useWebSocket } from '../composables/useWebSocket'
+import { HASH_ALGORITHMS, computeHash, normalizeHashType } from '../composables/useHash'
 
 interface FileInfo {
   filename: string
@@ -98,6 +127,8 @@ interface FileInfo {
   encrypted?: boolean
   salt?: string
   iv?: string
+  hash_type?: string
+  hash_value?: string
   received?: boolean
   received_at?: number
   received_by?: string
@@ -120,6 +151,44 @@ const error = ref('')
 const showHistory = ref(false)
 const decryptPasswords = reactive<Record<string, string>>({})
 const knownFilenames = ref<Set<string>>(new Set())
+const downloadedBuffers = reactive<Record<string, ArrayBuffer>>({})
+const verifyState = reactive<
+  Record<string, {
+    algorithm: string
+    expected: string
+    result: 'match' | 'mismatch' | 'computing' | ''
+    actual?: string
+  }>
+>({})
+
+function getVerifyState(file: FileInfo) {
+  const path = filePath(file)
+  if (!verifyState[path]) {
+    verifyState[path] = {
+      algorithm: normalizeHashType(file.hash_type),
+      expected: file.hash_value || '',
+      result: '',
+    }
+  }
+  return verifyState[path]
+}
+
+async function runVerify(file: FileInfo, buffer: ArrayBuffer) {
+  const state = getVerifyState(file)
+  if (!state.expected) {
+    state.result = ''
+    return
+  }
+  state.result = 'computing'
+  try {
+    const actual = await computeHash(buffer, state.algorithm)
+    state.actual = actual
+    state.result = actual.toLowerCase() === state.expected.toLowerCase().trim() ? 'match' : 'mismatch'
+  } catch (err: any) {
+    state.result = 'mismatch'
+    state.actual = err?.message || '计算失败'
+  }
+}
 
 const selfDeviceId = computed(() => selfDevice.value?.id || props.user?.username || '')
 
@@ -212,9 +281,13 @@ async function download(file: FileInfo) {
     const res = await axios.get(`/download/${encodeURIComponent(path)}`, {
       responseType: 'blob',
     })
-    triggerDownload(new Blob([res.data]), file.filename)
+    const blob = new Blob([res.data])
+    const buffer = await blob.arrayBuffer()
+    downloadedBuffers[path] = buffer
+    triggerDownload(blob, file.filename)
     recordReceive({ ...file, filename: path })
     markReceived(path)
+    await runVerify(file, buffer)
   } catch (err: any) {
     error.value = err?.response?.data?.message || '下载失败'
   }
@@ -237,9 +310,11 @@ async function downloadDecrypted(file: FileInfo) {
       responseType: 'arraybuffer',
     })
     const plaintext = await decryptFile(res.data, password, file.salt, file.iv)
+    downloadedBuffers[path] = plaintext
     triggerDownload(new Blob([plaintext]), file.filename)
     recordReceive({ ...file, filename: path })
     markReceived(path)
+    await runVerify(file, plaintext)
   } catch (err: any) {
     error.value = '解密失败：密码错误或文件损坏'
   }
@@ -272,6 +347,15 @@ function formatTime(timestamp: number): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function verifyLabel(result: string) {
+  switch (result) {
+    case 'match': return '✓ 一致'
+    case 'mismatch': return '✗ 不一致'
+    case 'computing': return '计算中...'
+    default: return ''
+  }
 }
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
@@ -550,6 +634,81 @@ onUnmounted(stopAutoRefresh)
   background: var(--primary-hover);
 }
 
+.verify-area {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.verify-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.verify-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.verify-input:focus,
+.verify-select:focus {
+  border-color: var(--primary);
+}
+
+.verify-btn {
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.verify-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.verify-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.verify-result {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.verify-result.match {
+  color: var(--success-text);
+}
+
+.verify-result.mismatch {
+  color: var(--danger-text);
+}
+
+.verify-result.computing {
+  color: var(--text-tertiary);
+}
+
 @media (max-width: 640px) {
   .receive-view {
     max-width: 100%;
@@ -590,6 +749,16 @@ onUnmounted(stopAutoRefresh)
   .download-btn {
     flex: 1;
     text-align: center;
+  }
+
+  .verify-area {
+    gap: 8px;
+  }
+
+  .verify-select,
+  .verify-input,
+  .verify-btn {
+    width: 100%;
   }
 }
 </style>

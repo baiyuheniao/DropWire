@@ -52,6 +52,7 @@ export interface UploadOptions {
   receiver?: string
   remark?: string
   password?: string
+  hashType?: string
   expiresInMinutes?: number
   targetUrl?: string
 }
@@ -248,6 +249,7 @@ async function uploadSingleFile(file: File, options?: UploadOptions) {
       salt: encryptedMeta.salt || null,
       iv: encryptedMeta.iv || null,
       expires_in_minutes: expiresInMinutes > 0 ? expiresInMinutes : null,
+      hash_type: options?.hashType || 'sha-256',
     })
     const returnedFilename = res.data.data as string | undefined
     const finalFilename = returnedFilename || file.name

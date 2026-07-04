@@ -42,6 +42,16 @@
           加密后文件内容会经过浏览器本地加密再上传，接收方需要相同密码才能解密。
         </p>
       </div>
+
+      <div class="option-group">
+        <label>下载校验</label>
+        <select v-model="hashType" class="hash-select">
+          <option v-for="alg in HASH_ALGORITHMS" :key="alg.value" :value="alg.value">
+            {{ alg.label }}
+          </option>
+        </select>
+        <p class="hash-hint">上传完成后会生成该校验值，接收方下载后可对比验证文件完整性。</p>
+      </div>
     </div>
 
     <FileUpload :options="uploadOptions" />
@@ -62,6 +72,7 @@ import DeviceList from './DeviceList.vue'
 import { type User } from './AccountModal.vue'
 import { selfDevice } from '../composables/useDevices'
 import type { DeviceInfo } from '../composables/useDevices'
+import { HASH_ALGORITHMS } from '../composables/useHash'
 
 const props = defineProps<{
   user: User | null
@@ -71,6 +82,7 @@ const selectedDevice = ref<DeviceInfo | null>(null)
 const remark = ref('')
 const enableEncryption = ref(false)
 const password = ref('')
+const hashType = ref('sha-256')
 const showHistory = ref(false)
 
 const targetUrl = computed(() => {
@@ -86,6 +98,7 @@ const uploadOptions = computed(() => ({
   targetUrl: targetUrl.value,
   remark: remark.value.trim() || undefined,
   password: enableEncryption.value ? password.value : undefined,
+  hashType: hashType.value,
 }))
 </script>
 
@@ -204,6 +217,31 @@ const uploadOptions = computed(() => ({
 }
 
 .encrypt-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.hash-select {
+  width: 100%;
+  max-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+}
+
+.hash-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.hash-hint {
   margin-top: 8px;
   font-size: 12px;
   color: var(--text-tertiary);
