@@ -11,6 +11,8 @@ export default defineConfig({
       '/files': 'http://localhost:3000',
       '/download': 'http://localhost:3000',
       '/server-info': 'http://localhost:3000',
+      '/devices': 'http://localhost:3000',
+      '/device': 'http://localhost:3000',
       '/ws': {
         target: 'ws://localhost:3000',
         ws: true,

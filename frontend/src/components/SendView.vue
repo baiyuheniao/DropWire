@@ -11,28 +11,9 @@
       </button>
     </div>
 
-    <div class="send-options">
-      <div class="option-group">
-        <label>发送对象</label>
-        <div class="receiver-field">
-          <select v-model="receiverMode" class="receiver-select">
-            <option value="">全局发送</option>
-            <option v-for="u in knownUsers" :key="u.username" :value="u.username">
-              {{ u.nickname || u.username }}
-            </option>
-            <option value="__custom__">指定用户...</option>
-          </select>
-          <input
-            v-if="receiverMode === '__custom__'"
-            v-model="customReceiver"
-            type="text"
-            class="custom-receiver"
-            placeholder="输入接收者用户名"
-            maxlength="32"
-          />
-        </div>
-      </div>
+    <DeviceList v-model="selectedDevice" />
 
+    <div class="send-options">
       <div class="option-group">
         <label>备注</label>
         <input
@@ -61,6 +42,16 @@
           加密后文件内容会经过浏览器本地加密再上传，接收方需要相同密码才能解密。
         </p>
       </div>
+
+      <div class="option-group">
+        <label>下载校验</label>
+        <select v-model="hashType" class="hash-select">
+          <option v-for="alg in HASH_ALGORITHMS" :key="alg.value" :value="alg.value">
+            {{ alg.label }}
+          </option>
+        </select>
+        <p class="hash-hint">上传完成后会生成该校验值，接收方下载后可对比验证文件完整性。</p>
+      </div>
     </div>
 
     <FileUpload :options="uploadOptions" />
@@ -74,55 +65,40 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import FileUpload from './FileUpload.vue'
 import HistoryModal from './HistoryModal.vue'
+import DeviceList from './DeviceList.vue'
 import { type User } from './AccountModal.vue'
+import { selfDevice } from '../composables/useDevices'
+import type { DeviceInfo } from '../composables/useDevices'
+import { HASH_ALGORITHMS } from '../composables/useHash'
 
 const props = defineProps<{
   user: User | null
 }>()
 
-const receiverMode = ref('')
-const customReceiver = ref('')
+const selectedDevice = ref<DeviceInfo | null>(null)
 const remark = ref('')
 const enableEncryption = ref(false)
 const password = ref('')
-const knownUsers = ref<User[]>([])
+const hashType = ref('sha-256')
 const showHistory = ref(false)
 
-onMounted(() => {
-  const users: User[] = []
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (key?.startsWith('dropwire_user_')) {
-      try {
-        const data = JSON.parse(localStorage.getItem(key) || '{}')
-        if (data.username) {
-          users.push({
-            username: data.username,
-            nickname: data.nickname || data.username,
-            avatar: data.avatar,
-          })
-        }
-      } catch {
-        // ignore invalid entries
-      }
-    }
+const targetUrl = computed(() => {
+  if (selectedDevice.value) {
+    return `http://${selectedDevice.value.ip}:${selectedDevice.value.port}`
   }
-  knownUsers.value = users
-})
-
-const effectiveReceiver = computed(() => {
-  if (receiverMode.value === '__custom__') return customReceiver.value.trim()
-  return receiverMode.value
+  return undefined
 })
 
 const uploadOptions = computed(() => ({
-  sender: props.user?.nickname || props.user?.username || undefined,
-  receiver: effectiveReceiver.value || undefined,
+  sender: props.user?.nickname || props.user?.username || selfDevice.value?.name || undefined,
+  receiver: selectedDevice.value?.id || undefined,
+  targetUrl: targetUrl.value,
   remark: remark.value.trim() || undefined,
   password: enableEncryption.value ? password.value : undefined,
+  hashType: hashType.value,
 }))
 </script>
 
@@ -188,15 +164,6 @@ const uploadOptions = computed(() => ({
   color: var(--text-secondary);
 }
 
-.receiver-field {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.receiver-select,
-.custom-receiver,
 .remark-input {
   padding: 10px 12px;
   border: 1px solid var(--border-strong);
@@ -208,22 +175,9 @@ const uploadOptions = computed(() => ({
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.receiver-select:focus,
-.custom-receiver:focus,
 .remark-input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-}
-
-.receiver-select {
-  min-width: 160px;
-  background: var(--bg-input);
-}
-
-.custom-receiver,
-.remark-input {
-  flex: 1;
-  min-width: 0;
 }
 
 .checkbox-label {
@@ -267,5 +221,54 @@ const uploadOptions = computed(() => ({
   font-size: 12px;
   color: var(--text-tertiary);
   line-height: 1.5;
+}
+
+.hash-select {
+  width: 100%;
+  max-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+}
+
+.hash-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.hash-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .send-view {
+    max-width: 100%;
+  }
+
+  .send-header h2 {
+    font-size: 16px;
+  }
+
+  .history-btn {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  .send-options {
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .password-input {
+    max-width: 100%;
+  }
 }
 </style>

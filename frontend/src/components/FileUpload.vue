@@ -8,8 +8,7 @@
       @dragleave.prevent="isDragging = false"
       @drop.prevent="onDrop"
       @click="fileInput?.click()"
-    >
-      <input ref="fileInput" type="file" multiple hidden @change="onFileChange" />
+    >      <input ref="fileInput" type="file" multiple webkitdirectory hidden @change="onFileChange" />
       <div class="drop-content">
         <div class="drop-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -19,7 +18,7 @@
           </svg>
         </div>
         <p class="drop-title">拖拽文件到此处</p>
-        <p class="drop-sub">或点击选择 · 支持多文件 · 2 MB 分片 · 并发 3</p>
+        <p class="drop-sub">或点击选择 · 支持多文件/文件夹 · 2 MB 分片 · 并发 3</p>
       </div>
     </div>
 
@@ -47,7 +46,10 @@
         <div class="task-body">
           <div class="task-header">
             <span class="filename" :title="task.filename">{{ task.filename }}</span>
-            <span class="badge" :class="task.status">{{ label(task.status) }}</span>
+            <div class="badges">
+              <span v-if="task.receivedAt" class="badge received">对方已接收</span>
+              <span class="badge" :class="task.status">{{ label(task.status) }}</span>
+            </div>
           </div>
 
           <div class="progress-track">
@@ -85,6 +87,7 @@
 import { ref, watch } from 'vue'
 import { useUpload, type UploadOptions, type UploadTask, type TaskStatus } from '../composables/useUpload'
 import { addHistory } from '../composables/useHistory'
+import { useWebSocket } from '../composables/useWebSocket'
 import FileDetailModal from './FileDetailModal.vue'
 
 const props = defineProps<{
@@ -95,6 +98,7 @@ const fileInput = ref<HTMLInputElement>()
 const isDragging = ref(false)
 const selectedTask = ref<UploadTask | null>(null)
 const { tasks, uploadFile } = useUpload()
+const { received } = useWebSocket('/ws')
 
 const recordedIds = new Set<string>()
 
@@ -121,13 +125,74 @@ watch(
   { deep: true, immediate: true },
 )
 
+watch(
+  () => received.value,
+  (next) => {
+    next.forEach((evt) => {
+      for (const [id, task] of tasks.value) {
+        if (task.filename === evt.filename && task.status === 'done' && !task.receivedAt) {
+          tasks.value = new Map(tasks.value).set(id, {
+            ...task,
+            receivedAt: evt.received_at,
+            receivedBy: evt.received_by,
+          })
+        }
+      }
+    })
+  },
+  { deep: true },
+)
+
 function openDetail(task: UploadTask) {
   selectedTask.value = task
 }
 
-function onDrop(e: DragEvent) {
+async function collectFiles(items: DataTransferItemList): Promise<File[]> {
+  const files: File[] = []
+
+  const readEntry = (entry: any): Promise<void> => {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        entry.file((file: File) => {
+          const relativePath = entry.fullPath.replace(/^\//, '')
+          if (!(file as any).webkitRelativePath) {
+            try {
+              Object.defineProperty(file, 'webkitRelativePath', {
+                value: relativePath,
+                configurable: true,
+              })
+            } catch { /* ignore */ }
+          }
+          files.push(file)
+          resolve()
+        })
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader()
+        reader.readEntries(async (entries: any[]) => {
+          await Promise.all(entries.map((child) => readEntry(child)))
+          resolve()
+        })
+      } else {
+        resolve()
+      }
+    })
+  }
+
+  const entries = Array.from(items)
+    .map((item) => item.webkitGetAsEntry())
+    .filter(Boolean)
+  await Promise.all(entries.map((entry) => readEntry(entry)))
+  return files
+}
+
+async function onDrop(e: DragEvent) {
   isDragging.value = false
-  Array.from(e.dataTransfer?.files ?? []).forEach((file) => uploadFile(file, props.options))
+  if (e.dataTransfer?.items && e.dataTransfer.items.length > 0 && typeof e.dataTransfer.items[0].webkitGetAsEntry === 'function') {
+    const files = await collectFiles(e.dataTransfer.items)
+    files.forEach((file) => uploadFile(file, props.options))
+  } else {
+    Array.from(e.dataTransfer?.files ?? []).forEach((file) => uploadFile(file, props.options))
+  }
 }
 
 function onFileChange(e: Event) {
@@ -301,6 +366,13 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   gap: 12px;
 }
 
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .filename {
   font-weight: 500;
   font-size: 14px;
@@ -326,6 +398,7 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
 .badge.merging   { color: var(--warning-text); background: var(--warning-bg); border-color: rgba(245, 158, 11, 0.25); }
 .badge.done      { color: var(--success-text); background: rgba(52, 211, 153, 0.12); border-color: rgba(34, 197, 94, 0.25); }
 .badge.error     { color: var(--danger-text); background: var(--danger-bg); border-color: rgba(239, 68, 68, 0.25); }
+.badge.received  { color: var(--success-text); background: rgba(52, 211, 153, 0.12); border-color: rgba(34, 197, 94, 0.25); }
 
 /* Progress bar */
 .progress-track {
@@ -411,4 +484,51 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   transform: translateX(16px);
 }
 
+@media (max-width: 640px) {
+  .drop-zone {
+    padding: 36px 20px;
+    border-radius: 12px;
+  }
+
+  .drop-zone.has-tasks {
+    padding: 20px;
+  }
+
+  .drop-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .drop-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .drop-title {
+    font-size: 15px;
+  }
+
+  .drop-sub {
+    font-size: 12px;
+  }
+
+  .task-card {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .task-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .task-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .filename {
+    font-size: 13px;
+  }
+}
 </style>
