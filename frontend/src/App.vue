@@ -319,4 +319,58 @@ body {
   flex: 1;
   padding: 32px 24px;
 }
+
+@media (max-width: 640px) {
+  .top-bar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .brand-logo {
+    width: 40px;
+    height: 32px;
+  }
+
+  .brand-name {
+    font-size: 16px;
+  }
+
+  .tabs {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    height: auto;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .tab {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-strong);
+    font-size: 14px;
+    top: 0;
+  }
+
+  .tab.active {
+    border-color: var(--primary);
+    background: var(--bg-primary-soft);
+  }
+
+  .status-area {
+    margin-left: auto;
+    gap: 6px;
+  }
+
+  .status-label {
+    display: none;
+  }
+
+  .main-content {
+    padding: 16px 12px;
+  }
+}
 </style>

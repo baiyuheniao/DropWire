@@ -393,4 +393,48 @@ function saveNotifications() {
   font-size: 13px;
   color: var(--success-text);
 }
+
+@media (max-width: 640px) {
+  .settings-view {
+    max-width: 100%;
+  }
+
+  .settings-card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .settings-card h2 {
+    font-size: 16px;
+  }
+
+  .input-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .input-row input,
+  .input-row button {
+    width: 100%;
+  }
+
+  .theme-options {
+    display: flex;
+    width: 100%;
+  }
+
+  .theme-btn {
+    flex: 1;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+}
 </style>

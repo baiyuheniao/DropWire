@@ -210,4 +210,33 @@ function selectDevice(device: DeviceInfo) {
 .status-dot.offline {
   background: var(--text-tertiary);
 }
+
+@media (max-width: 640px) {
+  .device-list {
+    padding: 14px;
+  }
+
+  .device-header h3 {
+    font-size: 14px;
+  }
+
+  .devices {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+  }
+
+  .device-card {
+    padding: 10px;
+  }
+
+  .device-avatar {
+    width: 34px;
+    height: 34px;
+    font-size: 12px;
+  }
+
+  .device-name {
+    font-size: 13px;
+  }
+}
 </style>

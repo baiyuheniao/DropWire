@@ -549,4 +549,47 @@ onUnmounted(stopAutoRefresh)
 .download-btn:hover {
   background: var(--primary-hover);
 }
+
+@media (max-width: 640px) {
+  .receive-view {
+    max-width: 100%;
+    padding: 0;
+  }
+
+  .receive-card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .receive-header h2 {
+    font-size: 16px;
+  }
+
+  .file-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .file-name {
+    font-size: 14px;
+  }
+
+  .download-area {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .decrypt-input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  .download-btn {
+    flex: 1;
+    text-align: center;
+  }
+}
 </style>

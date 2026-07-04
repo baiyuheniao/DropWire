@@ -484,4 +484,51 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   transform: translateX(16px);
 }
 
+@media (max-width: 640px) {
+  .drop-zone {
+    padding: 36px 20px;
+    border-radius: 12px;
+  }
+
+  .drop-zone.has-tasks {
+    padding: 20px;
+  }
+
+  .drop-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .drop-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .drop-title {
+    font-size: 15px;
+  }
+
+  .drop-sub {
+    font-size: 12px;
+  }
+
+  .task-card {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .task-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .task-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .filename {
+    font-size: 13px;
+  }
+}
 </style>

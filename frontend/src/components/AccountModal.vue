@@ -300,4 +300,24 @@ function logout() {
 .link-btn:hover {
   text-decoration: underline;
 }
+
+@media (max-width: 640px) {
+  .modal {
+    width: 92vw;
+    max-width: 380px;
+    border-radius: 12px;
+  }
+
+  .modal-header {
+    padding: 14px 16px;
+  }
+
+  .modal-header h3 {
+    font-size: 16px;
+  }
+
+  .modal-body {
+    padding: 16px;
+  }
+}
 </style>

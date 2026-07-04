@@ -209,4 +209,28 @@ const uploadOptions = computed(() => ({
   color: var(--text-tertiary);
   line-height: 1.5;
 }
+
+@media (max-width: 640px) {
+  .send-view {
+    max-width: 100%;
+  }
+
+  .send-header h2 {
+    font-size: 16px;
+  }
+
+  .history-btn {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  .send-options {
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .password-input {
+    max-width: 100%;
+  }
+}
 </style>
