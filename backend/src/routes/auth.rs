@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::models::ApiResponse;
+use crate::routes::auth_middleware::CurrentUser;
 use crate::state::{AppState, StoredUser};
 
 #[derive(Debug, Deserialize)]
@@ -29,7 +30,6 @@ pub struct LoginRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateProfileRequest {
-    pub username: String,
     pub nickname: Option<String>,
     pub avatar: Option<String>,
 }
@@ -162,16 +162,12 @@ pub async fn login(
 
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,
+    current_user: CurrentUser,
     Json(req): Json<UpdateProfileRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>, StatusCode> {
-    let username = req.username.trim().to_string();
-    if username.is_empty() {
-        return Ok(Json(ApiResponse {
-            success: false,
-            message: "用户名不能为空".to_string(),
-            data: None,
-        }));
-    }
+    // Always act on the authenticated user; the profile being updated cannot be
+    // chosen by the request body (prevents IDOR).
+    let username = current_user.username;
 
     let mut users = state.users.lock().await;
     match users.get_mut(&username) {
@@ -199,6 +195,26 @@ pub async fn update_profile(
             data: None,
         })),
     }
+}
+
+/// Invalidate the caller's session token so it stops accumulating in the
+/// in-memory session map. Idempotent: a missing/unknown token still succeeds.
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Json<ApiResponse<()>> {
+    if let Some(token) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+    {
+        state.sessions.lock().await.remove(token);
+    }
+    Json(ApiResponse {
+        success: true,
+        message: "已登出".to_string(),
+        data: None,
+    })
 }
 
 #[cfg(test)]
@@ -296,8 +312,10 @@ mod tests {
 
         let updated = update_profile(
             State(state),
-            Json(UpdateProfileRequest {
+            CurrentUser {
                 username: "carol".to_string(),
+            },
+            Json(UpdateProfileRequest {
                 nickname: Some("Carol".to_string()),
                 avatar: Some("https://example.com/avatar.png".to_string()),
             }),

@@ -157,7 +157,7 @@ async function saveProfile() {
   try {
     const res = await axios.post<{ success: boolean; message: string; data?: Omit<User, 'token'> }>(
       apiUrl('/auth/profile'),
-      { username: props.user.username, nickname, avatar },
+      { nickname, avatar },
     )
     if (!res.data.success || !res.data.data) {
       error.value = res.data.message || '保存失败'
