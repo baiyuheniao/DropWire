@@ -19,6 +19,20 @@
       </nav>
 
       <div class="status-area">
+        <div v-if="uploadSpeed > 0 || downloadSpeed > 0" class="speed-indicators">
+          <span class="speed-badge upload" title="当前上行速度">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
+            {{ formatSpeed(uploadSpeed) }}
+          </span>
+          <span class="speed-badge download" title="当前下行速度">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 5v14M5 12l7 7 7-7" />
+            </svg>
+            {{ formatSpeed(downloadSpeed) }}
+          </span>
+        </div>
         <div class="avatar" :class="{ logged: user }" @click="showAccountModal = true">
           <img v-if="user?.avatar" :src="user.avatar" alt="avatar" />
           <span v-else>{{ user ? user.nickname.charAt(0) : '头像' }}</span>
@@ -53,6 +67,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocket } from './composables/useWebSocket'
 import { loadSettings, settings, type ThemeMode } from './composables/useSettings'
 import { loadUser, setUser, type User } from './composables/useAuth'
+import { uploadSpeed, downloadSpeed, formatSpeed } from './composables/useNetworkSpeed'
 import SendView from './components/SendView.vue'
 import ReceiveView from './components/ReceiveView.vue'
 import SettingsView from './components/SettingsView.vue'
@@ -258,6 +273,42 @@ body {
   align-items: center;
   gap: 10px;
   margin-left: auto;
+}
+
+.speed-indicators {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.speed-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.speed-badge.upload {
+  color: var(--success-text);
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.speed-badge.download {
+  color: var(--primary-text);
+  background: var(--bg-primary-soft);
+  border-color: rgba(59, 130, 246, 0.25);
 }
 
 .avatar {

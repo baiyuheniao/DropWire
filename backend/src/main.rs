@@ -85,7 +85,15 @@ async fn main() {
         .route("/server-info", get(routes::info::server_info))
         .route("/auth/register", post(routes::auth::register))
         .route("/auth/login", post(routes::auth::login))
-        .route("/ws", get(routes::ws::ws_handler));
+        .route("/ws", get(routes::ws::ws_handler))
+        .route(
+            "/network/speed-test/upload",
+            post(routes::network::speed_test_upload).layer(DefaultBodyLimit::max(128 * 1024 * 1024)),
+        )
+        .route("/network/speed-test/download", get(routes::network::speed_test_download))
+        .route("/network/speed-test/public", get(routes::network::speed_test_public))
+        .route("/network/latency", get(routes::network::measure_latency))
+        .route("/network/status", get(routes::network::network_status));
 
     let app = protected
         .merge(public)

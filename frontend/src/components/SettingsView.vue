@@ -98,6 +98,8 @@
         </label>
       </section>
 
+      <NetworkTestPanel />
+
       <section class="section">
         <h3>关于</h3>
         <p class="hint">DropWire v0.1.0 · 局域网文件传输</p>
@@ -111,6 +113,7 @@ import { reactive, ref } from 'vue'
 import { type User } from '../composables/useAuth'
 import { QR_VALIDITY_OPTIONS, settings, saveSettings, type ThemeMode } from '../composables/useSettings'
 import { requestNotificationPermission } from '../composables/useNotifications'
+import NetworkTestPanel from './NetworkTestPanel.vue'
 
 defineProps<{
   user: User | null

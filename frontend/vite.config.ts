@@ -13,6 +13,8 @@ export default defineConfig({
       '/server-info': 'http://localhost:3000',
       '/devices': 'http://localhost:3000',
       '/device': 'http://localhost:3000',
+      '/auth': 'http://localhost:3000',
+      '/network': 'http://localhost:3000',
       '/ws': {
         target: 'ws://localhost:3000',
         ws: true,

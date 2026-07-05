@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import axios from 'axios'
 import { encryptFile } from './useCrypto'
 import { settings } from './useSettings'
+import { recordUpload } from './useNetworkSpeed'
 import { buildLanDownloadUrl, fetchServerInfo } from './useServerInfo'
 import { notify } from './useNotifications'
 import { computeHash } from './useHash'
@@ -138,6 +139,7 @@ async function uploadChunk(
   if (options?.remark) form.append('remark', options.remark)
 
   await axios.post(resolveUrl('/upload/chunk', options?.targetUrl), form)
+  recordUpload(chunkBuffer.byteLength)
 }
 
 async function uploadChunkWithRetry(

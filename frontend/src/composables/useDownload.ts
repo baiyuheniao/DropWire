@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import axios from 'axios'
+import { recordDownload } from './useNetworkSpeed'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB，与上传保持一致
 const CONCURRENCY = 3
@@ -21,6 +22,12 @@ export interface DownloadTask {
   chunks: ArrayBuffer[]
   /** 中止控制器，暂停时 abort 当前进行中的请求 */
   abortController?: AbortController
+  /** 最近测量的瞬时速度（字节/秒） */
+  speedBps: number
+  /** 基于当前速度估算的剩余时间（秒） */
+  etaSeconds: number
+  /** 每个 chunk 的下载耗时，用于平滑速度计算 */
+  chunkSamples: { bytes: number; ms: number }[]
 }
 
 /** 全局下载任务表，key 为文件路径 */
@@ -51,6 +58,9 @@ function ensureTask(key: string, filename: string, fileSize: number): DownloadTa
       downloadedChunks: 0,
       status: 'downloading',
       chunks: [],
+      speedBps: 0,
+      etaSeconds: 0,
+      chunkSamples: [],
     }
   }
   return tasks[key]
@@ -61,17 +71,19 @@ async function downloadChunkWithRetry(
   start: number,
   end: number,
   signal: AbortSignal,
-): Promise<ArrayBuffer> {
+): Promise<{ buffer: ArrayBuffer; durationMs: number }> {
   let lastErr: any
   for (let attempt = 0; attempt < RETRIES; attempt++) {
     if (signal.aborted) throw new DOMException('aborted', 'AbortError')
     try {
+      const t0 = performance.now()
       const res = await axios.get(url, {
         responseType: 'arraybuffer',
         headers: { Range: `bytes=${start}-${end}` },
         signal,
       })
-      return res.data
+      const durationMs = Math.max(1, performance.now() - t0)
+      return { buffer: res.data, durationMs }
     } catch (err: any) {
       // 暂停导致的 abort 直接抛出，不重试
       if (err?.name === 'AbortError' || signal.aborted) throw err
@@ -82,6 +94,20 @@ async function downloadChunkWithRetry(
     }
   }
   throw lastErr
+}
+
+const SAMPLE_WINDOW = 5
+
+function updateTaskSpeed(task: DownloadTask, bytes: number, ms: number) {
+  task.chunkSamples.push({ bytes, ms })
+  while (task.chunkSamples.length > SAMPLE_WINDOW) {
+    task.chunkSamples.shift()
+  }
+  const totalBytes = task.chunkSamples.reduce((sum, s) => sum + s.bytes, 0)
+  const totalMs = task.chunkSamples.reduce((sum, s) => sum + s.ms, 0)
+  task.speedBps = totalMs > 0 ? totalBytes / (totalMs / 1000) : 0
+  const remaining = task.fileSize - task.receivedBytes
+  task.etaSeconds = task.speedBps > 0 ? remaining / task.speedBps : 0
 }
 
 /**
@@ -136,10 +162,12 @@ export async function startDownload(
       const end = Math.min(start + CHUNK_SIZE - 1, fileSize - 1)
 
       try {
-        const buf = await downloadChunkWithRetry(url, start, end, signal)
+        const { buffer: buf, durationMs } = await downloadChunkWithRetry(url, start, end, signal)
         task.chunks[idx] = buf
         task.downloadedChunks++
         task.receivedBytes += buf.byteLength
+        updateTaskSpeed(task, buf.byteLength, durationMs)
+        recordDownload(buf.byteLength)
       } catch (err: any) {
         if (signal.aborted) return
         task.status = 'error'
@@ -206,4 +234,21 @@ function concatenate(chunks: ArrayBuffer[]): ArrayBuffer {
     offset += b.byteLength
   }
   return result.buffer
+}
+
+export function formatDownloadSpeed(bps: number): string {
+  if (bps <= 0) return '0 B/s'
+  if (bps < 1024) return `${bps.toFixed(0)} B/s`
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`
+  return `${(bps / 1024 / 1024).toFixed(2)} MB/s`
+}
+
+export function formatEta(seconds: number): string {
+  if (!isFinite(seconds) || seconds <= 0) return '计算中...'
+  if (seconds < 60) return `${Math.ceil(seconds)} 秒`
+  const m = Math.ceil(seconds / 60)
+  if (m < 60) return `${m} 分钟`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return `${h} 小时 ${rm} 分钟`
 }

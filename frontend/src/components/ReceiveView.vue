@@ -60,7 +60,15 @@
                   :style="{ width: downloadPct(filePath(file)) + '%' }"
                 />
               </div>
-              <span class="download-progress-text">{{ downloadPct(filePath(file)) }}%</span>
+              <div class="download-progress-info">
+                <span class="download-progress-text">{{ downloadPct(filePath(file)) }}%</span>
+                <span class="download-progress-speed">
+                  {{ formatDownloadSpeed(downloadTasks[filePath(file)].speedBps) }}
+                </span>
+                <span class="download-progress-eta">
+                  剩余 {{ formatEta(downloadTasks[filePath(file)].etaSeconds) }}
+                </span>
+              </div>
               <button
                 v-if="downloadTasks[filePath(file)].status === 'downloading'"
                 class="pause-btn"
@@ -157,6 +165,8 @@ import {
   startDownload,
   pauseDownload as pauseDownloadTask,
   getDownloadProgress,
+  formatDownloadSpeed,
+  formatEta,
 } from '../composables/useDownload'
 
 interface FileInfo {
@@ -731,11 +741,27 @@ onUnmounted(stopAutoRefresh)
   background: linear-gradient(90deg, #22c55e, #4ade80);
 }
 
-.download-progress-text {
+.download-progress-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 12px;
+}
+
+.download-progress-text {
   color: var(--text-secondary);
   min-width: 36px;
   text-align: right;
+}
+
+.download-progress-speed {
+  color: var(--primary);
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.download-progress-eta {
+  color: var(--text-tertiary);
 }
 
 .pause-btn,
