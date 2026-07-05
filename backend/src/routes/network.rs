@@ -74,21 +74,25 @@ pub async fn speed_test_download(
     Query(query): Query<DownloadSizeQuery>,
 ) -> Result<Response, StatusCode> {
     let size_mb = query.size_mb.clamp(1, 100);
-    let bytes = size_mb * 1024 * 1024;
-    let chunk = vec![0u8; 64 * 1024];
-    let mut body = Vec::with_capacity(bytes);
-    while body.len() + chunk.len() <= bytes {
-        body.extend_from_slice(&chunk);
-    }
-    if body.len() < bytes {
-        body.extend_from_slice(&vec![0u8; bytes - body.len()]);
-    }
+    let total = (size_mb * 1024 * 1024) as u64;
+
+    // Stream the payload in 64 KiB chunks rather than allocating the whole
+    // thing (up to 100 MB) in memory at once.
+    const BUF_SIZE: u64 = 64 * 1024;
+    let stream = futures::stream::unfold(total, |remaining| async move {
+        if remaining == 0 {
+            return None;
+        }
+        let n = remaining.min(BUF_SIZE);
+        let chunk = bytes::Bytes::from(vec![0u8; n as usize]);
+        Some((Ok::<_, std::io::Error>(chunk), remaining - n))
+    });
 
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(header::CONTENT_LENGTH, bytes.to_string())
-        .body(Body::from(body))
+        .header(header::CONTENT_LENGTH, total.to_string())
+        .body(Body::from_stream(stream))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 

@@ -53,6 +53,19 @@ pub struct UploadStatusResponse {
     received_chunks: Vec<usize>,
 }
 
+/// Validate an `upload_id` so it can only ever name a single directory under
+/// TEMP_DIR. Rejects empty ids and anything that isn't a plain segment (no
+/// path separators, no `.`/`..`), preventing traversal outside temp_chunks.
+fn sanitize_upload_id(input: &str) -> Option<String> {
+    if input.is_empty() {
+        return None;
+    }
+    let ok = input
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if ok { Some(input.to_string()) } else { None }
+}
+
 /// Sanitize a relative path by rejecting any `..` components.
 fn sanitize_relative_path(input: &str) -> Option<String> {
     if input.is_empty() {
@@ -225,19 +238,30 @@ pub async fn list_files(
 }
 
 fn resolve_output_path(filename: &str) -> Result<(PathBuf, PathBuf), StatusCode> {
-    let output_dir = PathBuf::from(OUTPUT_DIR);
-    let file_path = output_dir.join(filename);
-
-    let canonical_output = output_dir
-        .canonicalize()
-        .unwrap_or_else(|_| output_dir.clone());
-    let canonical_file = file_path
-        .canonicalize()
-        .unwrap_or_else(|_| file_path.clone());
-    if !canonical_file.starts_with(&canonical_output) {
+    // Reject any traversal (`..`, absolute, etc.) up front so containment does
+    // not depend on `canonicalize` — which fails (and used to silently fall
+    // back to the unchecked path) when the target file does not exist yet.
+    let safe = sanitize_relative_path(filename).ok_or(StatusCode::FORBIDDEN)?;
+    if safe.is_empty() {
         return Err(StatusCode::FORBIDDEN);
     }
-    Ok((canonical_output, canonical_file))
+
+    let output_dir = PathBuf::from(OUTPUT_DIR);
+    let file_path = output_dir.join(&safe);
+
+    // Defense in depth: when both paths exist, confirm containment after
+    // resolving symlinks. If either cannot be canonicalized, the component
+    // check above already guarantees the path stays under OUTPUT_DIR.
+    if let (Ok(canonical_output), Ok(canonical_file)) =
+        (output_dir.canonicalize(), file_path.canonicalize())
+    {
+        if !canonical_file.starts_with(&canonical_output) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        return Ok((canonical_output, canonical_file));
+    }
+
+    Ok((output_dir, file_path))
 }
 
 pub async fn download_file(
@@ -289,25 +313,19 @@ pub async fn download_file(
     };
 
     let length = end - start + 1;
-    let data = if length < file_size {
-        let mut file = fs::File::open(&canonical_file)
-            .await
-            .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    // Stream the requested byte range straight from disk instead of buffering
+    // the whole file (or range) in memory — avoids OOM on large files.
+    let mut file = fs::File::open(&canonical_file)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if start > 0 {
         use tokio::io::AsyncSeekExt;
         file.seek(std::io::SeekFrom::Start(start))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let mut buf = vec![0u8; length as usize];
-        use tokio::io::AsyncReadExt;
-        file.read_exact(&mut buf)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        buf
-    } else {
-        fs::read(&canonical_file)
-            .await
-            .map_err(|_| StatusCode::NOT_FOUND)?
-    };
+    }
+    let body = Body::from_stream(file_byte_stream(file, length));
 
     let (status, extra_headers) = if length < file_size {
         (
@@ -334,8 +352,33 @@ pub async fn download_file(
     }
 
     builder
-        .body(Body::from(data))
+        .body(body)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Stream up to `remaining` bytes from an already-positioned file in 64 KiB
+/// chunks, so responses never buffer the whole payload in memory.
+fn file_byte_stream(
+    file: fs::File,
+    remaining: u64,
+) -> impl futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> {
+    const BUF_SIZE: usize = 64 * 1024;
+    futures::stream::unfold((file, remaining), |(mut file, remaining)| async move {
+        if remaining == 0 {
+            return None;
+        }
+        let to_read = remaining.min(BUF_SIZE as u64) as usize;
+        let mut buf = vec![0u8; to_read];
+        use tokio::io::AsyncReadExt;
+        match file.read(&mut buf).await {
+            Ok(0) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                Some((Ok(bytes::Bytes::from(buf)), (file, remaining - n as u64)))
+            }
+            Err(e) => Some((Err(e), (file, 0))),
+        }
+    })
 }
 
 /// Parse a `Range: bytes=start-end` header, returning inclusive byte offsets.
@@ -447,6 +490,7 @@ pub async fn get_upload_status(
     Path(upload_id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ApiResponse<UploadStatusResponse>>, StatusCode> {
+    let upload_id = sanitize_upload_id(&upload_id).ok_or(StatusCode::BAD_REQUEST)?;
     let chunk_dir = PathBuf::from(TEMP_DIR).join(&upload_id);
 
     // Prefer in-memory state for the filename, but also scan disk in case the
@@ -561,7 +605,14 @@ pub async fn upload_chunk(
         }
     }
 
-    if upload_id.is_empty() || filename.is_empty() {
+    if filename.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let upload_id = sanitize_upload_id(&upload_id).ok_or(StatusCode::BAD_REQUEST)?;
+
+    // Reject nonsensical chunk metadata before it is used to index into the
+    // per-upload bookkeeping vectors (avoids an out-of-bounds panic).
+    if total_chunks == 0 || chunk_index >= total_chunks {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -603,6 +654,11 @@ pub async fn upload_chunk(
             chunk_hashes: vec![None; total_chunks],
         });
 
+        // A pre-existing entry may have been created with a different
+        // total_chunks; bail out rather than index out of bounds.
+        if chunk_index >= entry.chunk_received.len() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
         entry.chunk_received[chunk_index] = true;
         entry.chunk_hashes[chunk_index] = Some(chunk_hash.clone());
         entry.progress.received_chunks = entry.chunk_received.iter().filter(|&&x| x).count();
@@ -625,17 +681,25 @@ fn broadcast_progress(tx: &tokio::sync::broadcast::Sender<String>, progress: &Up
 
 pub async fn merge_chunks(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<MergeRequest>,
+    user: CurrentUser,
+    Json(mut req): Json<MergeRequest>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    let upload_id = sanitize_upload_id(&req.upload_id).ok_or(StatusCode::BAD_REQUEST)?;
+    req.upload_id = upload_id.clone();
+
+    // The sender is always the authenticated user; never trust the client to
+    // name who sent the file (prevents impersonation).
+    req.sender = Some(user.username.clone());
+
     {
         let mut uploads = state.uploads.lock().await;
-        if let Some(entry) = uploads.get_mut(&req.upload_id) {
+        if let Some(entry) = uploads.get_mut(&upload_id) {
             entry.progress.status = UploadStatus::Merging;
             broadcast_progress(&state.progress_tx, &entry.progress);
         }
     }
 
-    let chunk_dir = PathBuf::from(TEMP_DIR).join(&req.upload_id);
+    let chunk_dir = PathBuf::from(TEMP_DIR).join(&upload_id);
 
     // Validate all chunks are present before merging
     if !chunk_dir.exists() {
@@ -763,7 +827,9 @@ pub async fn merge_chunks(
 
     {
         let mut uploads = state.uploads.lock().await;
-        if let Some(entry) = uploads.get_mut(&req.upload_id) {
+        if let Some(mut entry) = uploads.remove(&req.upload_id) {
+            // Broadcast the terminal status, then drop the entry so completed
+            // uploads don't accumulate in memory for the process lifetime.
             entry.progress.status = UploadStatus::Completed;
             broadcast_progress(&state.progress_tx, &entry.progress);
         }

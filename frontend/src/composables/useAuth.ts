@@ -48,6 +48,12 @@ export function setUser(user: User | null) {
     localStorage.setItem(USER_KEY, JSON.stringify(safe))
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
   } else {
+    // Best-effort: tell the server to drop our session so it doesn't leak in
+    // the in-memory session map. Fire-and-forget; ignore failures.
+    const auth = axios.defaults.headers.common['Authorization']
+    if (auth) {
+      axios.post('/auth/logout').catch(() => {})
+    }
     localStorage.removeItem(USER_KEY)
     delete axios.defaults.headers.common['Authorization']
   }

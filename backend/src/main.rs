@@ -85,6 +85,7 @@ async fn main() {
         .route("/server-info", get(routes::info::server_info))
         .route("/auth/register", post(routes::auth::register))
         .route("/auth/login", post(routes::auth::login))
+        .route("/auth/logout", post(routes::auth::logout))
         .route("/ws", get(routes::ws::ws_handler))
         .route(
             "/network/speed-test/upload",
