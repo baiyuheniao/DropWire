@@ -466,6 +466,7 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   font-size: 12px;
   color: var(--primary-text);
   margin-top: 6px;
+  line-height: 1.4;
 }
 
 /* Transition */

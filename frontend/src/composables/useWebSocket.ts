@@ -20,8 +20,15 @@ const progress = ref<Map<string, UploadProgress>>(new Map())
 const received = ref<Map<string, ReceivedEvent>>(new Map())
 const connected = ref(false)
 let refCount = 0
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
 function connect(url: string) {
+  // Clear any pending reconnect before creating a new connection
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+
   ws = new WebSocket(url)
 
   ws.onopen = () => { connected.value = true }
@@ -41,10 +48,19 @@ function connect(url: string) {
 
   ws.onclose = () => {
     connected.value = false
-    setTimeout(() => connect(url), 3000)
+    // Only reconnect if we still have active consumers
+    if (refCount > 0 && !reconnectTimer) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        connect(url)
+      }, 3000)
+    }
   }
 
-  ws.onerror = () => ws?.close()
+  ws.onerror = () => {
+    // Let onclose handle reconnect; avoid double-trigger
+    ws?.close()
+  }
 }
 
 export function useWebSocket(url: string) {
@@ -54,6 +70,10 @@ export function useWebSocket(url: string) {
   onUnmounted(() => {
     refCount--
     if (refCount === 0) {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
       ws?.close()
       ws = null
     }
