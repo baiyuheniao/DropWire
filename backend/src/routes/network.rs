@@ -139,8 +139,44 @@ pub struct LatencyQuery {
     pub target: String,
 }
 
-/// Measure latency to a target peer by hitting its `/server-info` endpoint.
-pub async fn measure_latency(Query(query): Query<LatencyQuery>) -> Result<Json<LatencyResult>, StatusCode> {
+/// Extract the host portion of a `target` (with or without a scheme/port),
+/// e.g. "http://192.168.1.5:3000" or "192.168.1.5:3000" -> "192.168.1.5".
+fn extract_host(target: &str) -> &str {
+    let without_scheme = target
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+    authority.rsplit_once(':').map_or(authority, |(host, _)| host)
+}
+
+/// Only allow pinging hosts we already know about from device discovery (or
+/// ourselves). Without this, `target` is attacker-controlled input to a
+/// server-side HTTP request — an unauthenticated SSRF primitive that lets any
+/// caller make this backend probe arbitrary hosts (internal services, cloud
+/// metadata endpoints, etc.) and read back whether/how fast they responded.
+fn is_known_host(state: &AppState, host: &str) -> bool {
+    if state.discovery.self_info.lock().unwrap().ip == host {
+        return true;
+    }
+    state
+        .discovery
+        .peers
+        .lock()
+        .unwrap()
+        .values()
+        .any(|peer| peer.ip == host)
+}
+
+/// Measure latency to a known peer by hitting its `/server-info` endpoint.
+pub async fn measure_latency(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<LatencyQuery>,
+) -> Result<Json<LatencyResult>, StatusCode> {
+    let host = extract_host(&query.target);
+    if !is_known_host(&state, host) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let url = if query.target.starts_with("http://") || query.target.starts_with("https://") {
         format!("{}/server-info", query.target.trim_end_matches('/'))
     } else {
@@ -226,5 +262,57 @@ async fn fetch_public_ip() -> Result<String, reqwest::Error> {
         .text()
         .await?;
     Ok(text.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::DeviceInfo;
+
+    #[test]
+    fn extract_host_strips_scheme_port_and_path() {
+        assert_eq!(extract_host("192.168.1.5"), "192.168.1.5");
+        assert_eq!(extract_host("192.168.1.5:3000"), "192.168.1.5");
+        assert_eq!(extract_host("http://192.168.1.5:3000"), "192.168.1.5");
+        assert_eq!(extract_host("https://192.168.1.5:3000/"), "192.168.1.5");
+        assert_eq!(extract_host("http://evil.example.com/attack"), "evil.example.com");
+    }
+
+    fn state_with_peer(peer_ip: &str) -> Arc<AppState> {
+        let state = Arc::new(AppState::new());
+        state.discovery.peers.lock().unwrap().insert(
+            "peer-1".to_string(),
+            DeviceInfo {
+                id: "peer-1".to_string(),
+                name: "Peer".to_string(),
+                avatar: None,
+                ip: peer_ip.to_string(),
+                port: 3000,
+                last_seen: 0,
+                online: true,
+            },
+        );
+        state
+    }
+
+    #[test]
+    fn known_peer_host_is_allowed() {
+        let state = state_with_peer("192.168.1.5");
+        assert!(is_known_host(&state, "192.168.1.5"));
+    }
+
+    #[test]
+    fn arbitrary_host_is_rejected() {
+        let state = state_with_peer("192.168.1.5");
+        assert!(!is_known_host(&state, "169.254.169.254"));
+        assert!(!is_known_host(&state, "evil.example.com"));
+    }
+
+    #[test]
+    fn self_host_is_allowed() {
+        let state = Arc::new(AppState::new());
+        state.discovery.self_info.lock().unwrap().ip = "10.0.0.9".to_string();
+        assert!(is_known_host(&state, "10.0.0.9"));
+    }
 }
 
