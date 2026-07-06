@@ -95,9 +95,12 @@ pub async fn register(
         password_hash,
     };
     users.insert(username.clone(), user);
+    drop(users);
+    state.save_users().await;
 
     let token = generate_token();
     state.sessions.lock().await.insert(token.clone(), username.clone());
+    state.save_sessions().await;
 
     Ok(Json(ApiResponse {
         success: true,
@@ -147,6 +150,7 @@ pub async fn login(
 
     let token = generate_token();
     state.sessions.lock().await.insert(token.clone(), username.clone());
+    state.save_sessions().await;
 
     Ok(Json(ApiResponse {
         success: true,
@@ -170,7 +174,7 @@ pub async fn update_profile(
     let username = current_user.username;
 
     let mut users = state.users.lock().await;
-    match users.get_mut(&username) {
+    let response = match users.get_mut(&username) {
         Some(user) => {
             if let Some(nickname) = req.nickname {
                 user.nickname = nickname;
@@ -178,15 +182,24 @@ pub async fn update_profile(
             if let Some(avatar) = req.avatar {
                 user.avatar = Some(avatar);
             }
+            Some(UserResponse {
+                username: user.username.clone(),
+                nickname: user.nickname.clone(),
+                avatar: user.avatar.clone(),
+                token: String::new(),
+            })
+        }
+        None => None,
+    };
+    drop(users);
+
+    match response {
+        Some(data) => {
+            state.save_users().await;
             Ok(Json(ApiResponse {
                 success: true,
                 message: "ok".to_string(),
-                data: Some(UserResponse {
-                    username: user.username.clone(),
-                    nickname: user.nickname.clone(),
-                    avatar: user.avatar.clone(),
-                    token: String::new(),
-                }),
+                data: Some(data),
             }))
         }
         None => Ok(Json(ApiResponse {
@@ -208,7 +221,10 @@ pub async fn logout(
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
     {
-        state.sessions.lock().await.remove(token);
+        let removed = state.sessions.lock().await.remove(token).is_some();
+        if removed {
+            state.save_sessions().await;
+        }
     }
     Json(ApiResponse {
         success: true,
