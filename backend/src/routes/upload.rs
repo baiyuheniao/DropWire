@@ -969,6 +969,96 @@ async fn sweep_stale_temp_chunks_in(state: &AppState, temp_dir_str: &str, max_ag
 mod tests {
     use super::*;
 
+    #[test]
+    fn sanitize_upload_id_accepts_alphanumeric_dash_underscore() {
+        assert_eq!(sanitize_upload_id("abc-123_XYZ"), Some("abc-123_XYZ".to_string()));
+    }
+
+    #[test]
+    fn sanitize_upload_id_rejects_empty() {
+        assert_eq!(sanitize_upload_id(""), None);
+    }
+
+    #[test]
+    fn sanitize_upload_id_rejects_path_traversal() {
+        assert_eq!(sanitize_upload_id(".."), None);
+        assert_eq!(sanitize_upload_id("../../etc/passwd"), None);
+        assert_eq!(sanitize_upload_id("a/b"), None);
+        assert_eq!(sanitize_upload_id("a\\b"), None);
+    }
+
+    #[test]
+    fn sanitize_relative_path_accepts_empty_and_plain_segments() {
+        assert_eq!(sanitize_relative_path(""), Some(String::new()));
+        assert_eq!(sanitize_relative_path("folder/sub"), Some("folder/sub".to_string()));
+    }
+
+    #[test]
+    fn sanitize_relative_path_rejects_traversal_and_absolute() {
+        assert_eq!(sanitize_relative_path("../secret"), None);
+        assert_eq!(sanitize_relative_path("a/../../b"), None);
+        assert_eq!(sanitize_relative_path("/etc/passwd"), None);
+    }
+
+    #[test]
+    fn build_relative_file_path_combines_dir_and_filename() {
+        assert_eq!(
+            build_relative_file_path(Some("folder"), "file.txt"),
+            Some("folder/file.txt".to_string())
+        );
+        assert_eq!(
+            build_relative_file_path(None, "file.txt"),
+            Some("file.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn build_relative_file_path_rejects_traversal_in_either_part() {
+        assert_eq!(build_relative_file_path(Some("../evil"), "file.txt"), None);
+        assert_eq!(build_relative_file_path(Some("folder"), "../file.txt"), None);
+        assert_eq!(build_relative_file_path(None, ""), None);
+    }
+
+    #[test]
+    fn resolve_output_path_rejects_traversal() {
+        assert!(resolve_output_path("../../etc/passwd").is_err());
+        assert!(resolve_output_path("").is_err());
+        assert!(resolve_output_path("safe/name.txt").is_ok());
+    }
+
+    #[test]
+    fn parse_range_full_and_partial() {
+        // No end given -> to end of file.
+        assert_eq!(parse_range("bytes=0-", 100), Some((0, 99)));
+        // Explicit inclusive range.
+        assert_eq!(parse_range("bytes=10-19", 100), Some((10, 19)));
+        // End clamped to file size.
+        assert_eq!(parse_range("bytes=90-999", 100), Some((90, 99)));
+    }
+
+    #[test]
+    fn parse_range_rejects_invalid_ranges() {
+        assert_eq!(parse_range("bytes=50-10", 100), None); // start > end
+        assert_eq!(parse_range("bytes=100-200", 100), None); // start >= file_size
+        assert_eq!(parse_range("not-a-range", 100), None);
+    }
+
+    #[test]
+    fn compute_file_hash_known_vectors() {
+        // sha256("") = e3b0c442...
+        let sha256 = compute_file_hash(b"", "sha256").unwrap();
+        assert_eq!(sha256, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(sha256.len(), 64);
+
+        let md5 = compute_file_hash(b"", "md5").unwrap();
+        assert_eq!(md5, "d41d8cd98f00b204e9800998ecf8427e");
+    }
+
+    #[test]
+    fn compute_file_hash_rejects_unknown_type() {
+        assert!(compute_file_hash(b"data", "not-a-real-hash").is_err());
+    }
+
     fn scratch_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("dropwire-test-{}-{}", label, uuid::Uuid::new_v4()));
         dir

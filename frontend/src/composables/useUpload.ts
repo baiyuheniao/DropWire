@@ -23,7 +23,7 @@ function generateUUID(): string {
   })
 }
 
-function simpleHash(input: string): string {
+export function simpleHash(input: string): string {
   // djb2-like non-cryptographic hash. Avoids crypto.subtle which requires a
   // secure context (HTTPS/localhost); this fingerprint only needs to be stable
   // for the same file, not cryptographically secure.
@@ -34,7 +34,7 @@ function simpleHash(input: string): string {
   return hash.toString(16).padStart(8, '0')
 }
 
-function deriveUploadId(file: File, password?: string): string {
+export function deriveUploadId(file: File, password?: string): string {
   // Encrypted uploads change ciphertext on every encryption (random IV/salt),
   // so resuming by file fingerprint does not work. Use a random id instead.
   if (password) {
@@ -45,7 +45,7 @@ function deriveUploadId(file: File, password?: string): string {
   return simpleHash(raw)
 }
 
-function getRelativePath(file: File): string | undefined {
+export function getRelativePath(file: File): string | undefined {
   const rp = (file as any).webkitRelativePath
   return typeof rp === 'string' && rp.length > 0 ? rp : undefined
 }
