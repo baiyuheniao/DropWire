@@ -9,7 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
@@ -21,7 +21,12 @@ const TEMP_DIR: &str = "./temp_chunks";
 const OUTPUT_DIR: &str = "./uploads";
 const META_DIR: &str = "./uploads_meta";
 
-fn now_secs() -> u64 {
+const CLEANUP_SWEEP_INTERVAL_SECS: u64 = 5 * 60;
+/// An upload directory in TEMP_DIR untouched for this long is considered
+/// abandoned (client crashed/disconnected mid-upload and never merged).
+const STALE_UPLOAD_MAX_AGE_SECS: u64 = 24 * 60 * 60;
+
+pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -238,6 +243,13 @@ pub async fn list_files(
 }
 
 fn resolve_output_path(filename: &str) -> Result<(PathBuf, PathBuf), StatusCode> {
+    resolve_output_path_in(OUTPUT_DIR, filename)
+}
+
+/// Core of `resolve_output_path`, parametrized over the output directory so
+/// the cleanup sweep's tests can point it at a scratch directory instead of
+/// the real `OUTPUT_DIR`.
+fn resolve_output_path_in(output_dir_str: &str, filename: &str) -> Result<(PathBuf, PathBuf), StatusCode> {
     // Reject any traversal (`..`, absolute, etc.) up front so containment does
     // not depend on `canonicalize` — which fails (and used to silently fall
     // back to the unchecked path) when the target file does not exist yet.
@@ -246,7 +258,7 @@ fn resolve_output_path(filename: &str) -> Result<(PathBuf, PathBuf), StatusCode>
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let output_dir = PathBuf::from(OUTPUT_DIR);
+    let output_dir = PathBuf::from(output_dir_str);
     let file_path = output_dir.join(&safe);
 
     // Defense in depth: when both paths exist, confirm containment after
@@ -840,4 +852,307 @@ pub async fn merge_chunks(
         message: "file merged successfully".to_string(),
         data: Some(req.filename),
     }))
+}
+
+/// Background loop: periodically delete expired uploaded files and abandoned
+/// temp_chunks directories so disk usage doesn't grow unbounded. Neither
+/// `expires_at` filtering in `list_files`/`download_file` nor client
+/// disconnects during upload actually remove anything from disk on their own.
+pub async fn run_cleanup_sweep(state: Arc<AppState>) {
+    let mut ticker = tokio::time::interval(Duration::from_secs(CLEANUP_SWEEP_INTERVAL_SECS));
+    loop {
+        ticker.tick().await;
+        sweep_expired_files().await;
+        sweep_stale_temp_chunks(&state).await;
+    }
+}
+
+/// Walk META_DIR and delete any output file (plus its meta) whose
+/// `expires_at` has passed.
+async fn sweep_expired_files() {
+    sweep_expired_files_in(META_DIR, OUTPUT_DIR).await;
+}
+
+async fn sweep_expired_files_in(meta_dir_str: &str, output_dir_str: &str) {
+    let meta_dir = PathBuf::from(meta_dir_str);
+    if !meta_dir.exists() {
+        return;
+    }
+    let now = now_secs();
+    let mut stack = vec![meta_dir.clone()];
+
+    while let Some(dir) = stack.pop() {
+        let mut entries = match fs::read_dir(&dir).await {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let metadata = match entry.metadata().await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let data = match fs::read(&path).await {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            let meta: FileMeta = match serde_json::from_slice(&data) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let expired = matches!(meta.expires_at, Some(exp) if exp > 0 && exp <= now);
+            if !expired {
+                continue;
+            }
+
+            let relative = match path.strip_prefix(&meta_dir) {
+                Ok(r) => r.to_string_lossy().into_owned(),
+                Err(_) => continue,
+            };
+            let relative = relative.strip_suffix(".json").unwrap_or(&relative).to_string();
+
+            // Reuse the same canonicalize/containment check download_file
+            // relies on, rather than joining onto output_dir_str directly -
+            // defense in depth against a symlink ever landing inside the
+            // uploads directory, even though `relative` here always comes
+            // from a meta filename this server itself already sanitized.
+            let output_path = match resolve_output_path_in(output_dir_str, &relative) {
+                Ok((_, path)) => path,
+                Err(_) => continue,
+            };
+
+            let _ = fs::remove_file(&output_path).await;
+            let _ = fs::remove_file(&path).await;
+            tracing::info!("cleanup: removed expired file {}", relative);
+        }
+    }
+}
+
+/// Remove temp_chunks/<upload_id> directories that haven't been written to
+/// in over STALE_UPLOAD_MAX_AGE_SECS, and drop any matching in-memory upload
+/// entry so it doesn't linger alongside the deleted chunks.
+async fn sweep_stale_temp_chunks(state: &AppState) {
+    sweep_stale_temp_chunks_in(state, TEMP_DIR, Duration::from_secs(STALE_UPLOAD_MAX_AGE_SECS)).await;
+}
+
+async fn sweep_stale_temp_chunks_in(state: &AppState, temp_dir_str: &str, max_age: Duration) {
+    let temp_dir = PathBuf::from(temp_dir_str);
+    let mut entries = match fs::read_dir(&temp_dir).await {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let now = SystemTime::now();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        let metadata = match entry.metadata().await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let modified = match metadata.modified() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let age = match now.duration_since(modified) {
+            Ok(a) => a,
+            Err(_) => continue,
+        };
+        if age < max_age {
+            continue;
+        }
+
+        if let Some(upload_id) = path.file_name().and_then(|n| n.to_str()) {
+            state.uploads.lock().await.remove(upload_id);
+        }
+        if fs::remove_dir_all(&path).await.is_ok() {
+            tracing::info!("cleanup: removed stale upload dir {:?} (age {}s)", path, age.as_secs());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_upload_id_accepts_alphanumeric_dash_underscore() {
+        assert_eq!(sanitize_upload_id("abc-123_XYZ"), Some("abc-123_XYZ".to_string()));
+    }
+
+    #[test]
+    fn sanitize_upload_id_rejects_empty() {
+        assert_eq!(sanitize_upload_id(""), None);
+    }
+
+    #[test]
+    fn sanitize_upload_id_rejects_path_traversal() {
+        assert_eq!(sanitize_upload_id(".."), None);
+        assert_eq!(sanitize_upload_id("../../etc/passwd"), None);
+        assert_eq!(sanitize_upload_id("a/b"), None);
+        assert_eq!(sanitize_upload_id("a\\b"), None);
+    }
+
+    #[test]
+    fn sanitize_relative_path_accepts_empty_and_plain_segments() {
+        assert_eq!(sanitize_relative_path(""), Some(String::new()));
+        assert_eq!(sanitize_relative_path("folder/sub"), Some("folder/sub".to_string()));
+    }
+
+    #[test]
+    fn sanitize_relative_path_rejects_traversal_and_absolute() {
+        assert_eq!(sanitize_relative_path("../secret"), None);
+        assert_eq!(sanitize_relative_path("a/../../b"), None);
+        assert_eq!(sanitize_relative_path("/etc/passwd"), None);
+    }
+
+    #[test]
+    fn build_relative_file_path_combines_dir_and_filename() {
+        assert_eq!(
+            build_relative_file_path(Some("folder"), "file.txt"),
+            Some("folder/file.txt".to_string())
+        );
+        assert_eq!(
+            build_relative_file_path(None, "file.txt"),
+            Some("file.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn build_relative_file_path_rejects_traversal_in_either_part() {
+        assert_eq!(build_relative_file_path(Some("../evil"), "file.txt"), None);
+        assert_eq!(build_relative_file_path(Some("folder"), "../file.txt"), None);
+        assert_eq!(build_relative_file_path(None, ""), None);
+    }
+
+    #[test]
+    fn resolve_output_path_rejects_traversal() {
+        assert!(resolve_output_path("../../etc/passwd").is_err());
+        assert!(resolve_output_path("").is_err());
+        assert!(resolve_output_path("safe/name.txt").is_ok());
+    }
+
+    #[test]
+    fn parse_range_full_and_partial() {
+        // No end given -> to end of file.
+        assert_eq!(parse_range("bytes=0-", 100), Some((0, 99)));
+        // Explicit inclusive range.
+        assert_eq!(parse_range("bytes=10-19", 100), Some((10, 19)));
+        // End clamped to file size.
+        assert_eq!(parse_range("bytes=90-999", 100), Some((90, 99)));
+    }
+
+    #[test]
+    fn parse_range_rejects_invalid_ranges() {
+        assert_eq!(parse_range("bytes=50-10", 100), None); // start > end
+        assert_eq!(parse_range("bytes=100-200", 100), None); // start >= file_size
+        assert_eq!(parse_range("not-a-range", 100), None);
+    }
+
+    #[test]
+    fn compute_file_hash_known_vectors() {
+        // sha256("") = e3b0c442...
+        let sha256 = compute_file_hash(b"", "sha256").unwrap();
+        assert_eq!(sha256, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(sha256.len(), 64);
+
+        let md5 = compute_file_hash(b"", "md5").unwrap();
+        assert_eq!(md5, "d41d8cd98f00b204e9800998ecf8427e");
+    }
+
+    #[test]
+    fn compute_file_hash_rejects_unknown_type() {
+        assert!(compute_file_hash(b"data", "not-a-real-hash").is_err());
+    }
+
+    fn scratch_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dropwire-test-{}-{}", label, uuid::Uuid::new_v4()));
+        dir
+    }
+
+    #[tokio::test]
+    async fn sweep_removes_expired_file_and_meta() {
+        let meta_dir = scratch_dir("meta");
+        let output_dir = scratch_dir("output");
+        fs::create_dir_all(&meta_dir).await.unwrap();
+        fs::create_dir_all(&output_dir).await.unwrap();
+
+        fs::write(output_dir.join("gone.txt"), b"bye").await.unwrap();
+        let meta = FileMeta {
+            expires_at: Some(1),
+            ..Default::default()
+        };
+        fs::write(meta_dir.join("gone.txt.json"), serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
+
+        sweep_expired_files_in(meta_dir.to_str().unwrap(), output_dir.to_str().unwrap()).await;
+
+        assert!(!output_dir.join("gone.txt").exists());
+        assert!(!meta_dir.join("gone.txt.json").exists());
+
+        let _ = fs::remove_dir_all(&meta_dir).await;
+        let _ = fs::remove_dir_all(&output_dir).await;
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_non_expired_file() {
+        let meta_dir = scratch_dir("meta");
+        let output_dir = scratch_dir("output");
+        fs::create_dir_all(&meta_dir).await.unwrap();
+        fs::create_dir_all(&output_dir).await.unwrap();
+
+        fs::write(output_dir.join("keep.txt"), b"hi").await.unwrap();
+        let meta = FileMeta {
+            expires_at: Some(now_secs() + 3600),
+            ..Default::default()
+        };
+        fs::write(meta_dir.join("keep.txt.json"), serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
+
+        sweep_expired_files_in(meta_dir.to_str().unwrap(), output_dir.to_str().unwrap()).await;
+
+        assert!(output_dir.join("keep.txt").exists());
+        assert!(meta_dir.join("keep.txt.json").exists());
+
+        let _ = fs::remove_dir_all(&meta_dir).await;
+        let _ = fs::remove_dir_all(&output_dir).await;
+    }
+
+    #[tokio::test]
+    async fn stale_temp_chunk_dir_is_removed() {
+        let temp_dir = scratch_dir("temp");
+        fs::create_dir_all(temp_dir.join("upload-1")).await.unwrap();
+
+        let state = AppState::new();
+        // max_age of 0 means "anything counts as stale" so the test doesn't
+        // have to wait real time for the directory to age.
+        sweep_stale_temp_chunks_in(&state, temp_dir.to_str().unwrap(), Duration::from_secs(0)).await;
+
+        assert!(!temp_dir.join("upload-1").exists());
+        let _ = fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn fresh_temp_chunk_dir_is_kept() {
+        let temp_dir = scratch_dir("temp");
+        fs::create_dir_all(temp_dir.join("upload-2")).await.unwrap();
+
+        let state = AppState::new();
+        sweep_stale_temp_chunks_in(&state, temp_dir.to_str().unwrap(), Duration::from_secs(STALE_UPLOAD_MAX_AGE_SECS)).await;
+
+        assert!(temp_dir.join("upload-2").exists());
+        let _ = fs::remove_dir_all(&temp_dir).await;
+    }
 }

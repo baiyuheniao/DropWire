@@ -11,6 +11,8 @@ backend/temp_chunks/
 backend/uploads/
 backend/uploads_meta/
 device_*.json
+users.json
+sessions.json
 
 # 测试/临时文件
 test-crypto.mjs

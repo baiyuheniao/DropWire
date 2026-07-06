@@ -139,13 +139,57 @@ pub struct LatencyQuery {
     pub target: String,
 }
 
-/// Measure latency to a target peer by hitting its `/server-info` endpoint.
-pub async fn measure_latency(Query(query): Query<LatencyQuery>) -> Result<Json<LatencyResult>, StatusCode> {
-    let url = if query.target.starts_with("http://") || query.target.starts_with("https://") {
-        format!("{}/server-info", query.target.trim_end_matches('/'))
-    } else {
-        format!("http://{}/server-info", query.target)
+/// Extract the host portion of a `target` (with or without a scheme/port),
+/// e.g. "http://192.168.1.5:3000" or "192.168.1.5:3000" -> "192.168.1.5".
+fn extract_host(target: &str) -> &str {
+    let without_scheme = target
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+    authority.rsplit_once(':').map_or(authority, |(host, _)| host)
+}
+
+/// Look up a known device (ourselves or a discovered peer) whose IP matches
+/// `host`, returning its trusted `(ip, port)` from server-side state.
+///
+/// Without this, `target` would be attacker-controlled input to a
+/// server-side HTTP request — an unauthenticated SSRF primitive that lets any
+/// caller make this backend probe arbitrary hosts (internal services, cloud
+/// metadata endpoints, etc.) and read back whether/how fast they responded.
+/// Critically, the request URL below is built entirely from this trusted
+/// `(ip, port)` pair, never from the raw client-supplied `target` string —
+/// otherwise a value like "&lt;known-ip&gt;:1@evil.example.com" would pass a
+/// naive host check (the part before the last `:`) while a URL parser still
+/// sends the actual request to `evil.example.com` (everything after `@` is
+/// the authority's host, per URL syntax).
+fn resolve_known_peer(state: &AppState, host: &str) -> Option<(String, u16)> {
+    let self_info = state.discovery.self_info.lock().unwrap();
+    if self_info.ip == host {
+        return Some((self_info.ip.clone(), self_info.port));
+    }
+    drop(self_info);
+
+    state
+        .discovery
+        .peers
+        .lock()
+        .unwrap()
+        .values()
+        .find(|peer| peer.ip == host)
+        .map(|peer| (peer.ip.clone(), peer.port))
+}
+
+/// Measure latency to a known peer by hitting its `/server-info` endpoint.
+pub async fn measure_latency(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<LatencyQuery>,
+) -> Result<Json<LatencyResult>, StatusCode> {
+    let host = extract_host(&query.target);
+    let (ip, port) = match resolve_known_peer(&state, host) {
+        Some(v) => v,
+        None => return Err(StatusCode::FORBIDDEN),
     };
+    let url = format!("http://{}:{}/server-info", ip, port);
 
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -226,5 +270,91 @@ async fn fetch_public_ip() -> Result<String, reqwest::Error> {
         .text()
         .await?;
     Ok(text.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::DeviceInfo;
+
+    #[test]
+    fn extract_host_strips_scheme_port_and_path() {
+        assert_eq!(extract_host("192.168.1.5"), "192.168.1.5");
+        assert_eq!(extract_host("192.168.1.5:3000"), "192.168.1.5");
+        assert_eq!(extract_host("http://192.168.1.5:3000"), "192.168.1.5");
+        assert_eq!(extract_host("https://192.168.1.5:3000/"), "192.168.1.5");
+        assert_eq!(extract_host("http://evil.example.com/attack"), "evil.example.com");
+    }
+
+    #[test]
+    fn extract_host_can_be_fooled_by_userinfo_syntax() {
+        // A naive rsplit_once(':') host extraction is fooled by URL userinfo
+        // syntax ("user:pass@host") into treating a peer's IP as the host,
+        // even though a URL parser sends the real request to the host after
+        // '@'. This is exactly why resolve_known_peer must never let this
+        // extracted string leak into the outgoing request URL - see below.
+        assert_eq!(extract_host("192.168.1.5:1@evil.example.com"), "192.168.1.5");
+    }
+
+    fn state_with_peer(peer_ip: &str) -> Arc<AppState> {
+        let state = Arc::new(AppState::new());
+        state.discovery.peers.lock().unwrap().insert(
+            "peer-1".to_string(),
+            DeviceInfo {
+                id: "peer-1".to_string(),
+                name: "Peer".to_string(),
+                avatar: None,
+                ip: peer_ip.to_string(),
+                port: 3000,
+                last_seen: 0,
+                online: true,
+            },
+        );
+        state
+    }
+
+    #[test]
+    fn known_peer_host_resolves_to_its_trusted_address() {
+        let state = state_with_peer("192.168.1.5");
+        assert_eq!(
+            resolve_known_peer(&state, "192.168.1.5"),
+            Some(("192.168.1.5".to_string(), 3000))
+        );
+    }
+
+    #[test]
+    fn arbitrary_host_is_rejected() {
+        let state = state_with_peer("192.168.1.5");
+        assert_eq!(resolve_known_peer(&state, "169.254.169.254"), None);
+        assert_eq!(resolve_known_peer(&state, "evil.example.com"), None);
+    }
+
+    #[test]
+    fn self_host_resolves_to_its_trusted_address() {
+        let state = Arc::new(AppState::new());
+        {
+            let mut self_info = state.discovery.self_info.lock().unwrap();
+            self_info.ip = "10.0.0.9".to_string();
+            self_info.port = 4000;
+        }
+        assert_eq!(
+            resolve_known_peer(&state, "10.0.0.9"),
+            Some(("10.0.0.9".to_string(), 4000))
+        );
+    }
+
+    #[test]
+    fn resolved_address_is_never_influenced_by_the_raw_target_string() {
+        // Even though extract_host mis-parses "192.168.1.5:1@evil.example.com"
+        // as host "192.168.1.5" (see extract_host_can_be_fooled_by_userinfo_syntax),
+        // resolve_known_peer only ever returns the peer's own stored ip/port -
+        // it has no way to leak "evil.example.com" into the outgoing request,
+        // because it never looks at the raw target string, only the matched
+        // peer's trusted record.
+        let state = state_with_peer("192.168.1.5");
+        let host = extract_host("192.168.1.5:1@evil.example.com");
+        let resolved = resolve_known_peer(&state, host);
+        assert_eq!(resolved, Some(("192.168.1.5".to_string(), 3000)));
+    }
 }
 

@@ -45,6 +45,11 @@ async fn main() {
 
     let state = Arc::new(AppState::new().with_discovery(discovery));
 
+    let cleanup_state = state.clone();
+    tokio::spawn(async move {
+        routes::upload::run_cleanup_sweep(cleanup_state).await;
+    });
+
     let allow_origin = if allowed_origins.is_empty() {
         AllowOrigin::any()
     } else {
