@@ -26,7 +26,7 @@ const CLEANUP_SWEEP_INTERVAL_SECS: u64 = 5 * 60;
 /// abandoned (client crashed/disconnected mid-upload and never merged).
 const STALE_UPLOAD_MAX_AGE_SECS: u64 = 24 * 60 * 60;
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -243,6 +243,13 @@ pub async fn list_files(
 }
 
 fn resolve_output_path(filename: &str) -> Result<(PathBuf, PathBuf), StatusCode> {
+    resolve_output_path_in(OUTPUT_DIR, filename)
+}
+
+/// Core of `resolve_output_path`, parametrized over the output directory so
+/// the cleanup sweep's tests can point it at a scratch directory instead of
+/// the real `OUTPUT_DIR`.
+fn resolve_output_path_in(output_dir_str: &str, filename: &str) -> Result<(PathBuf, PathBuf), StatusCode> {
     // Reject any traversal (`..`, absolute, etc.) up front so containment does
     // not depend on `canonicalize` — which fails (and used to silently fall
     // back to the unchecked path) when the target file does not exist yet.
@@ -251,7 +258,7 @@ fn resolve_output_path(filename: &str) -> Result<(PathBuf, PathBuf), StatusCode>
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let output_dir = PathBuf::from(OUTPUT_DIR);
+    let output_dir = PathBuf::from(output_dir_str);
     let file_path = output_dir.join(&safe);
 
     // Defense in depth: when both paths exist, confirm containment after
@@ -911,7 +918,16 @@ async fn sweep_expired_files_in(meta_dir_str: &str, output_dir_str: &str) {
                 Err(_) => continue,
             };
             let relative = relative.strip_suffix(".json").unwrap_or(&relative).to_string();
-            let output_path = PathBuf::from(output_dir_str).join(&relative);
+
+            // Reuse the same canonicalize/containment check download_file
+            // relies on, rather than joining onto output_dir_str directly -
+            // defense in depth against a symlink ever landing inside the
+            // uploads directory, even though `relative` here always comes
+            // from a meta filename this server itself already sanitized.
+            let output_path = match resolve_output_path_in(output_dir_str, &relative) {
+                Ok((_, path)) => path,
+                Err(_) => continue,
+            };
 
             let _ = fs::remove_file(&output_path).await;
             let _ = fs::remove_file(&path).await;
