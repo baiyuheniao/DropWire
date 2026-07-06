@@ -58,6 +58,14 @@ pub struct UploadEntry {
     pub chunk_hashes: Vec<Option<String>>,
 }
 
+/// Tracks failed login attempts for a single username so repeated wrong
+/// passwords can be throttled instead of allowed at unlimited speed.
+#[derive(Debug, Default)]
+pub struct LoginAttempt {
+    pub failures: u32,
+    pub locked_until: Option<u64>,
+}
+
 pub struct AppState {
     pub uploads: Mutex<HashMap<String, UploadEntry>>,
     /// Broadcasts JSON-serialized `UploadProgress` to all WS clients.
@@ -66,6 +74,9 @@ pub struct AppState {
     pub users: Mutex<HashMap<String, StoredUser>>,
     /// Maps bearer token to username.
     pub sessions: Mutex<HashMap<String, String>>,
+    /// Not persisted across restarts - a fresh process gets a clean slate,
+    /// which is an acceptable tradeoff for a LAN tool.
+    pub login_attempts: Mutex<HashMap<String, LoginAttempt>>,
 }
 
 impl AppState {
@@ -76,6 +87,7 @@ impl AppState {
             progress_tx: tx,
             users: Mutex::new(load_json_map(USERS_FILE)),
             sessions: Mutex::new(load_json_map(SESSIONS_FILE)),
+            login_attempts: Mutex::new(HashMap::new()),
             discovery: DiscoveryState {
                 self_info: std::sync::Arc::new(std::sync::Mutex::new(crate::discovery::DeviceInfo {
                     id: String::new(),

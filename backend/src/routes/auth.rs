@@ -114,6 +114,28 @@ pub async fn register(
     }))
 }
 
+const MAX_LOGIN_FAILURES: u32 = 5;
+const LOGIN_LOCKOUT_SECS: u64 = 60;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Record a failed login attempt and lock the username out once it has
+/// failed too many times in a row, so passwords can't be brute-forced at
+/// unlimited speed.
+async fn record_failed_login(state: &AppState, username: &str) {
+    let mut attempts = state.login_attempts.lock().await;
+    let entry = attempts.entry(username.to_string()).or_default();
+    entry.failures += 1;
+    if entry.failures >= MAX_LOGIN_FAILURES {
+        entry.locked_until = Some(now_secs() + LOGIN_LOCKOUT_SECS);
+    }
+}
+
 pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoginRequest>,
@@ -127,10 +149,25 @@ pub async fn login(
         }));
     }
 
+    {
+        let attempts = state.login_attempts.lock().await;
+        if let Some(locked_until) = attempts.get(&username).and_then(|a| a.locked_until) {
+            if locked_until > now_secs() {
+                return Ok(Json(ApiResponse {
+                    success: false,
+                    message: "登录尝试次数过多，请稍后再试".to_string(),
+                    data: None,
+                }));
+            }
+        }
+    }
+
     let users = state.users.lock().await;
     let user = match users.get(&username) {
         Some(u) => u.clone(),
         None => {
+            drop(users);
+            record_failed_login(&state, &username).await;
             return Ok(Json(ApiResponse {
                 success: false,
                 message: "用户不存在".to_string(),
@@ -141,12 +178,15 @@ pub async fn login(
     drop(users);
 
     if !verify_password(&req.password, &user.password_hash)? {
+        record_failed_login(&state, &username).await;
         return Ok(Json(ApiResponse {
             success: false,
             message: "密码错误".to_string(),
             data: None,
         }));
     }
+
+    state.login_attempts.lock().await.remove(&username);
 
     let token = generate_token();
     state.sessions.lock().await.insert(token.clone(), username.clone());
@@ -342,5 +382,92 @@ mod tests {
         let user = updated.0.data.unwrap();
         assert_eq!(user.nickname, "Carol");
         assert_eq!(user.avatar, Some("https://example.com/avatar.png".to_string()));
+    }
+
+    #[tokio::test]
+    async fn login_locks_out_after_repeated_failures() {
+        let state = test_state();
+        let _ = register(
+            State(state.clone()),
+            Json(RegisterRequest {
+                username: "dave".to_string(),
+                password: "correct".to_string(),
+                nickname: None,
+                avatar: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        for _ in 0..MAX_LOGIN_FAILURES {
+            let attempt = login(
+                State(state.clone()),
+                Json(LoginRequest {
+                    username: "dave".to_string(),
+                    password: "wrong".to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+            assert!(!attempt.0.success);
+        }
+
+        // Even the correct password is now rejected until the lockout expires.
+        let locked_out = login(
+            State(state.clone()),
+            Json(LoginRequest {
+                username: "dave".to_string(),
+                password: "correct".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!locked_out.0.success);
+        assert!(locked_out.0.message.contains("次数过多"));
+    }
+
+    #[tokio::test]
+    async fn successful_login_clears_failure_count() {
+        let state = test_state();
+        let _ = register(
+            State(state.clone()),
+            Json(RegisterRequest {
+                username: "erin".to_string(),
+                password: "correct".to_string(),
+                nickname: None,
+                avatar: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        for _ in 0..MAX_LOGIN_FAILURES - 1 {
+            let _ = login(
+                State(state.clone()),
+                Json(LoginRequest {
+                    username: "erin".to_string(),
+                    password: "wrong".to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+        }
+
+        let ok = login(
+            State(state.clone()),
+            Json(LoginRequest {
+                username: "erin".to_string(),
+                password: "correct".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(ok.0.success);
+
+        assert!(!state
+            .login_attempts
+            .lock()
+            .await
+            .contains_key("erin"));
     }
 }
