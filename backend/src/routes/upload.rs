@@ -9,7 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
@@ -20,6 +20,11 @@ use crate::state::{AppState, UploadEntry, UploadProgress, UploadStatus};
 const TEMP_DIR: &str = "./temp_chunks";
 const OUTPUT_DIR: &str = "./uploads";
 const META_DIR: &str = "./uploads_meta";
+
+const CLEANUP_SWEEP_INTERVAL_SECS: u64 = 5 * 60;
+/// An upload directory in TEMP_DIR untouched for this long is considered
+/// abandoned (client crashed/disconnected mid-upload and never merged).
+const STALE_UPLOAD_MAX_AGE_SECS: u64 = 24 * 60 * 60;
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -840,4 +845,208 @@ pub async fn merge_chunks(
         message: "file merged successfully".to_string(),
         data: Some(req.filename),
     }))
+}
+
+/// Background loop: periodically delete expired uploaded files and abandoned
+/// temp_chunks directories so disk usage doesn't grow unbounded. Neither
+/// `expires_at` filtering in `list_files`/`download_file` nor client
+/// disconnects during upload actually remove anything from disk on their own.
+pub async fn run_cleanup_sweep(state: Arc<AppState>) {
+    let mut ticker = tokio::time::interval(Duration::from_secs(CLEANUP_SWEEP_INTERVAL_SECS));
+    loop {
+        ticker.tick().await;
+        sweep_expired_files().await;
+        sweep_stale_temp_chunks(&state).await;
+    }
+}
+
+/// Walk META_DIR and delete any output file (plus its meta) whose
+/// `expires_at` has passed.
+async fn sweep_expired_files() {
+    sweep_expired_files_in(META_DIR, OUTPUT_DIR).await;
+}
+
+async fn sweep_expired_files_in(meta_dir_str: &str, output_dir_str: &str) {
+    let meta_dir = PathBuf::from(meta_dir_str);
+    if !meta_dir.exists() {
+        return;
+    }
+    let now = now_secs();
+    let mut stack = vec![meta_dir.clone()];
+
+    while let Some(dir) = stack.pop() {
+        let mut entries = match fs::read_dir(&dir).await {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let metadata = match entry.metadata().await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let data = match fs::read(&path).await {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            let meta: FileMeta = match serde_json::from_slice(&data) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let expired = matches!(meta.expires_at, Some(exp) if exp > 0 && exp <= now);
+            if !expired {
+                continue;
+            }
+
+            let relative = match path.strip_prefix(&meta_dir) {
+                Ok(r) => r.to_string_lossy().into_owned(),
+                Err(_) => continue,
+            };
+            let relative = relative.strip_suffix(".json").unwrap_or(&relative).to_string();
+            let output_path = PathBuf::from(output_dir_str).join(&relative);
+
+            let _ = fs::remove_file(&output_path).await;
+            let _ = fs::remove_file(&path).await;
+            tracing::info!("cleanup: removed expired file {}", relative);
+        }
+    }
+}
+
+/// Remove temp_chunks/<upload_id> directories that haven't been written to
+/// in over STALE_UPLOAD_MAX_AGE_SECS, and drop any matching in-memory upload
+/// entry so it doesn't linger alongside the deleted chunks.
+async fn sweep_stale_temp_chunks(state: &AppState) {
+    sweep_stale_temp_chunks_in(state, TEMP_DIR, Duration::from_secs(STALE_UPLOAD_MAX_AGE_SECS)).await;
+}
+
+async fn sweep_stale_temp_chunks_in(state: &AppState, temp_dir_str: &str, max_age: Duration) {
+    let temp_dir = PathBuf::from(temp_dir_str);
+    let mut entries = match fs::read_dir(&temp_dir).await {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let now = SystemTime::now();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        let metadata = match entry.metadata().await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let modified = match metadata.modified() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let age = match now.duration_since(modified) {
+            Ok(a) => a,
+            Err(_) => continue,
+        };
+        if age < max_age {
+            continue;
+        }
+
+        if let Some(upload_id) = path.file_name().and_then(|n| n.to_str()) {
+            state.uploads.lock().await.remove(upload_id);
+        }
+        if fs::remove_dir_all(&path).await.is_ok() {
+            tracing::info!("cleanup: removed stale upload dir {:?} (age {}s)", path, age.as_secs());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dropwire-test-{}-{}", label, uuid::Uuid::new_v4()));
+        dir
+    }
+
+    #[tokio::test]
+    async fn sweep_removes_expired_file_and_meta() {
+        let meta_dir = scratch_dir("meta");
+        let output_dir = scratch_dir("output");
+        fs::create_dir_all(&meta_dir).await.unwrap();
+        fs::create_dir_all(&output_dir).await.unwrap();
+
+        fs::write(output_dir.join("gone.txt"), b"bye").await.unwrap();
+        let meta = FileMeta {
+            expires_at: Some(1),
+            ..Default::default()
+        };
+        fs::write(meta_dir.join("gone.txt.json"), serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
+
+        sweep_expired_files_in(meta_dir.to_str().unwrap(), output_dir.to_str().unwrap()).await;
+
+        assert!(!output_dir.join("gone.txt").exists());
+        assert!(!meta_dir.join("gone.txt.json").exists());
+
+        let _ = fs::remove_dir_all(&meta_dir).await;
+        let _ = fs::remove_dir_all(&output_dir).await;
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_non_expired_file() {
+        let meta_dir = scratch_dir("meta");
+        let output_dir = scratch_dir("output");
+        fs::create_dir_all(&meta_dir).await.unwrap();
+        fs::create_dir_all(&output_dir).await.unwrap();
+
+        fs::write(output_dir.join("keep.txt"), b"hi").await.unwrap();
+        let meta = FileMeta {
+            expires_at: Some(now_secs() + 3600),
+            ..Default::default()
+        };
+        fs::write(meta_dir.join("keep.txt.json"), serde_json::to_vec(&meta).unwrap())
+            .await
+            .unwrap();
+
+        sweep_expired_files_in(meta_dir.to_str().unwrap(), output_dir.to_str().unwrap()).await;
+
+        assert!(output_dir.join("keep.txt").exists());
+        assert!(meta_dir.join("keep.txt.json").exists());
+
+        let _ = fs::remove_dir_all(&meta_dir).await;
+        let _ = fs::remove_dir_all(&output_dir).await;
+    }
+
+    #[tokio::test]
+    async fn stale_temp_chunk_dir_is_removed() {
+        let temp_dir = scratch_dir("temp");
+        fs::create_dir_all(temp_dir.join("upload-1")).await.unwrap();
+
+        let state = AppState::new();
+        // max_age of 0 means "anything counts as stale" so the test doesn't
+        // have to wait real time for the directory to age.
+        sweep_stale_temp_chunks_in(&state, temp_dir.to_str().unwrap(), Duration::from_secs(0)).await;
+
+        assert!(!temp_dir.join("upload-1").exists());
+        let _ = fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn fresh_temp_chunk_dir_is_kept() {
+        let temp_dir = scratch_dir("temp");
+        fs::create_dir_all(temp_dir.join("upload-2")).await.unwrap();
+
+        let state = AppState::new();
+        sweep_stale_temp_chunks_in(&state, temp_dir.to_str().unwrap(), Duration::from_secs(STALE_UPLOAD_MAX_AGE_SECS)).await;
+
+        assert!(temp_dir.join("upload-2").exists());
+        let _ = fs::remove_dir_all(&temp_dir).await;
+    }
 }
