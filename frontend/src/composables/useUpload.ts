@@ -6,6 +6,7 @@ import { recordUpload } from './useNetworkSpeed'
 import { buildLanDownloadUrl, fetchServerInfo } from './useServerInfo'
 import { notify } from './useNotifications'
 import { computeHash } from './useHash'
+import { uploadLimiter, refreshUploadLimiter } from './useRateLimit'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB
 const CHUNK_CONCURRENCY = 3
@@ -139,6 +140,7 @@ async function uploadChunk(
   if (options?.remark) form.append('remark', options.remark)
 
   await axios.post(resolveUrl('/upload/chunk', options?.targetUrl), form)
+  await uploadLimiter.consume(chunkBuffer.byteLength)
   recordUpload(chunkBuffer.byteLength)
 }
 
