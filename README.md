@@ -2,7 +2,7 @@
 
 > 🔥 Trae 创造力大赛参赛作品 —— 局域网高速文件传输工具
 
-![DropWire Demo](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20interface%20showing%20upload%20progress%2C%20devices%20list%2C%20speed%20gauges%2C%20professional%20UI%20design%2C%20blue%20accent%20color&image_size=landscape_16_9)
+![DropWire Demo](https://picsum.photos/id/2/1200/675)
 
 ## 📋 项目概述
 

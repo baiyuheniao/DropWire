@@ -8,7 +8,7 @@
 
 ### 1. 发送页面
 
-![发送页面](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20send%20page%2C%20drag%20and%20drop%20upload%20area%2C%20device%20list%20sidebar%2C%20encryption%20options%2C%20hash%20algorithm%20selector%2C%20blue%20accent%20color%2C%20clean%20UI%20design&image_size=landscape_16_9)
+![发送页面](https://picsum.photos/id/0/1200/675)
 
 **功能说明**：
 - 文件拖拽上传区域
@@ -19,7 +19,7 @@
 
 ### 2. 接收页面
 
-![接收页面](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20receive%20page%2C%20file%20list%20with%20preview%20and%20download%20buttons%2C%20verify%20toggle%20button%2C%20sender%20tags%2C%20file%20meta%20information%2C%20blue%20accent%20color&image_size=landscape_16_9)
+![接收页面](https://picsum.photos/id/180/1200/675)
 
 **功能说明**：
 - 可接收文件列表
@@ -30,7 +30,7 @@
 
 ### 3. 设置页面
 
-![设置页面](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20settings%20page%2C%20network%20diagnosis%20card%2C%20theme%20settings%2C%20account%20management%2C%20clean%20layout%2C%20blue%20accent%20color&image_size=landscape_16_9)
+![设置页面](https://picsum.photos/id/119/1200/675)
 
 **功能说明**：
 - 网络诊断概览卡片（默认折叠）
@@ -40,7 +40,7 @@
 
 ### 4. 网络诊断弹窗
 
-![网络诊断弹窗](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20network%20diagnosis%20modal%20window%2C%20network%20status%20grid%2C%20topology%20chart%2C%20speed%20gauges%20for%20upload%20and%20download%2C%20progress%20bars%2C%20blue%20accent%20color%2C%20professional%20UI&image_size=landscape_16_9)
+![网络诊断弹窗](https://picsum.photos/id/48/1200/675)
 
 **功能说明**：
 - 网络现状（本机IP、公网IP、设备数量）
@@ -51,7 +51,7 @@
 
 ### 5. 账户弹窗
 
-![账户弹窗](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20account%20modal%20window%2C%20login%20and%20register%20forms%2C%20avatar%20upload%2C%20password%20field%2C%20submit%20button%2C%20blue%20accent%20color%2C%20clean%20design&image_size=landscape_16_9)
+![账户弹窗](https://picsum.photos/id/20/1200/675)
 
 **功能说明**：
 - 用户注册/登录表单
@@ -61,7 +61,7 @@
 
 ### 6. 速度仪表盘
 
-![速度仪表盘](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20speed%20gauge%20dashboard%2C%20semi%20circular%20arc%20charts%2C%20upload%20and%20download%20speed%20display%2C%20progress%20bars%2C%20Mbps%20units%2C%20blue%20gradient%20color%2C%20professional%20visualization&image_size=landscape_16_9)
+![速度仪表盘](https://picsum.photos/id/160/1200/675)
 
 **功能说明**：
 - 半圆弧速度仪表盘

@@ -35,21 +35,21 @@
 - WebSocket 实时推送传输进度
 - 断点续传支持，网络中断后可从断点继续
 
-![发送页面](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20send%20page%2C%20drag%20and%20drop%20upload%20area%2C%20device%20list%2C%20encryption%20options%2C%20blue%20accent%20color&image_size=landscape_16_9)
+![发送页面](https://picsum.photos/id/0/1200/675)
 
 #### 核心功能二：安全加密传输
 - AES-256-GCM 端到端加密
 - Argon2 密码哈希安全存储
 - 支持多种文件校验算法（SHA-256/MD5/CRC32）
 
-![接收页面](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20receive%20page%2C%20file%20list%20with%20preview%20download%20verify%20buttons%2C%20sender%20tags%2C%20blue%20accent%20color&image_size=landscape_16_9)
+![接收页面](https://picsum.photos/id/180/1200/675)
 
 #### 核心功能三：网络诊断与测速
 - 局域网设备自动发现与拓扑图
 - 内/公网测速可视化仪表盘
 - 实时上行/下行速度指示器
 
-![网络诊断](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20network%20diagnosis%20modal%2C%20topology%20chart%2C%20speed%20gauges%2C%20progress%20bars%2C%20blue%20accent%20color&image_size=landscape_16_9)
+![网络诊断](https://picsum.photos/id/119/1200/675)
 
 ---
 
@@ -113,17 +113,17 @@ pnpm dev
 #### 步骤一：安全问题修复
 修复密码明文存储问题，使用 Argon2 哈希存储密码。
 
-![安全修复](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Software%20development%20security%20fix%20code%20review%2C%20password%20hashing%20implementation%2C%20Argon2%20algorithm%2C%20dark%20theme%20code%20editor%2C%20professional%20developer%20workspace&image_size=landscape_16_9)
+![安全修复](https://picsum.photos/id/48/1200/675)
 
 #### 步骤二：速度可视化仪表盘开发
 创建半圆弧速度仪表盘组件，直观展示测速结果。
 
-![速度仪表盘开发](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Frontend%20development%20speed%20gauge%20component%2C%20SVG%20semicircle%20chart%2C%20Vue%203%20TypeScript%20code%2C%20dark%20theme%20IDE%2C%20visualization%20implementation&image_size=landscape_16_9)
+![速度仪表盘开发](https://picsum.photos/id/20/1200/675)
 
 #### 步骤三：网络诊断功能实现
 实现局域网设备发现和网络诊断功能。
 
-![网络诊断开发](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Network%20diagnosis%20feature%20development%2C%20device%20discovery%2C%20topology%20chart%2C%20speed%20test%2C%20dark%20theme%20dashboard%2C%20professional%20UI&image_size=landscape_16_9)
+![网络诊断开发](https://picsum.photos/id/160/1200/675)
 
 ### 关键任务证明
 
