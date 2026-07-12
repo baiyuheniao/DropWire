@@ -32,107 +32,111 @@
 
       <ul v-else class="file-list">
         <li v-for="file in filteredFiles" :key="`${filePath(file)}|${file.size}`" class="file-item">
-          <div class="file-info">
-            <div class="file-name" :title="filePath(file)">{{ file.filename }}</div>
-            <div class="file-tags">
-              <span v-if="file.encrypted" class="tag encrypted">🔒 加密</span>
-              <span v-if="file.sender" class="tag sender">来自: {{ file.sender }}</span>
-              <span v-if="file.receiver" class="tag receiver">发给: {{ file.receiver }}</span>
-              <span v-if="file.remark" class="tag remark">备注: {{ file.remark }}</span>
-              <span v-if="file.received" class="tag confirmed">✓ 已接收</span>
+          <div class="file-main">
+            <div class="file-info">
+              <div class="file-name" :title="filePath(file)">{{ file.filename }}</div>
+              <div class="file-tags">
+                <span v-if="file.encrypted" class="tag encrypted">🔒 加密</span>
+                <span v-if="file.sender" class="tag sender">来自: {{ file.sender }}</span>
+                <span v-if="file.receiver" class="tag receiver">发给: {{ file.receiver }}</span>
+                <span v-if="file.remark" class="tag remark">备注: {{ file.remark }}</span>
+                <span v-if="file.received" class="tag confirmed">✓ 已接收</span>
+              </div>
+              <div class="file-meta">
+                <span>{{ formatSize(file.size) }}</span>
+                <span v-if="file.modified_at">{{ formatTime(file.modified_at) }}</span>
+              </div>
             </div>
-            <div class="file-meta">
-              <span>{{ formatSize(file.size) }}</span>
-              <span v-if="file.modified_at">{{ formatTime(file.modified_at) }}</span>
-            </div>
-          </div>
 
-          <div class="download-area">
-            <!-- 预览按钮：仅支持未加密的可预览文件类型 -->
-            <button
-              v-if="!file.encrypted && canPreview(file.filename)"
-              class="preview-btn"
-              @click="openPreview(file)"
-              title="预览文件"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-              预览
-            </button>
+            <div class="file-actions">
+              <div class="download-area">
+                <!-- 预览按钮：仅支持未加密的可预览文件类型 -->
+                <button
+                  v-if="!file.encrypted && canPreview(file.filename)"
+                  class="preview-btn"
+                  @click="openPreview(file)"
+                  title="预览文件"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                  </svg>
+                  预览
+                </button>
 
-            <!-- 下载中 / 暂停 / 完成：显示进度条 + 控制按钮 -->
-            <div
-              v-if="downloadTasks[filePath(file)]"
-              class="download-progress-wrapper"
-            >
-              <div class="download-progress-track">
+                <!-- 下载中 / 暂停 / 完成：显示进度条 + 控制按钮 -->
                 <div
-                  class="download-progress-bar"
-                  :class="downloadTasks[filePath(file)].status"
-                  :style="{ width: downloadPct(filePath(file)) + '%' }"
-                />
+                  v-if="downloadTasks[filePath(file)]"
+                  class="download-progress-wrapper"
+                >
+                  <div class="download-progress-track">
+                    <div
+                      class="download-progress-bar"
+                      :class="downloadTasks[filePath(file)].status"
+                      :style="{ width: downloadPct(filePath(file)) + '%' }"
+                    />
+                  </div>
+                  <div class="download-progress-info">
+                    <span class="download-progress-text">{{ downloadPct(filePath(file)) }}%</span>
+                    <span class="download-progress-speed">
+                      {{ formatDownloadSpeed(downloadTasks[filePath(file)].speedBps) }}
+                    </span>
+                    <span class="download-progress-eta">
+                      剩余 {{ formatEta(downloadTasks[filePath(file)].etaSeconds) }}
+                    </span>
+                  </div>
+                  <button
+                    v-if="downloadTasks[filePath(file)].status === 'downloading'"
+                    class="pause-btn"
+                    @click="pauseDownload(filePath(file))"
+                  >
+                    暂停
+                  </button>
+                  <button
+                    v-if="downloadTasks[filePath(file)].status === 'paused'"
+                    class="resume-btn"
+                    @click="resumeDownload(file)"
+                  >
+                    继续
+                  </button>
+                  <button
+                    v-if="downloadTasks[filePath(file)].status === 'error'"
+                    class="resume-btn"
+                    @click="resumeDownload(file)"
+                  >
+                    重试
+                  </button>
+                </div>
+
+                <!-- 初始下载按钮 -->
+                <template v-else-if="file.encrypted">
+                  <input
+                    v-model="decryptPasswords[filePath(file)]"
+                    type="password"
+                    class="decrypt-input"
+                    placeholder="输入密码"
+                  />
+                  <button class="download-btn" @click="downloadDecrypted(file)">
+                    解密下载
+                  </button>
+                </template>
+                <button v-else class="download-btn" @click="download(file)">
+                  下载
+                </button>
               </div>
-              <div class="download-progress-info">
-                <span class="download-progress-text">{{ downloadPct(filePath(file)) }}%</span>
-                <span class="download-progress-speed">
-                  {{ formatDownloadSpeed(downloadTasks[filePath(file)].speedBps) }}
-                </span>
-                <span class="download-progress-eta">
-                  剩余 {{ formatEta(downloadTasks[filePath(file)].etaSeconds) }}
-                </span>
+
+              <div class="verify-toggle">
+                <button
+                  class="verify-toggle-btn"
+                  :class="{ expanded: verifyExpanded[filePath(file)] }"
+                  @click="toggleVerify(filePath(file))"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                  文件校验
+                </button>
               </div>
-              <button
-                v-if="downloadTasks[filePath(file)].status === 'downloading'"
-                class="pause-btn"
-                @click="pauseDownload(filePath(file))"
-              >
-                暂停
-              </button>
-              <button
-                v-if="downloadTasks[filePath(file)].status === 'paused'"
-                class="resume-btn"
-                @click="resumeDownload(file)"
-              >
-                继续
-              </button>
-              <button
-                v-if="downloadTasks[filePath(file)].status === 'error'"
-                class="resume-btn"
-                @click="resumeDownload(file)"
-              >
-                重试
-              </button>
             </div>
-
-            <!-- 初始下载按钮 -->
-            <template v-else-if="file.encrypted">
-              <input
-                v-model="decryptPasswords[filePath(file)]"
-                type="password"
-                class="decrypt-input"
-                placeholder="输入密码"
-              />
-              <button class="download-btn" @click="downloadDecrypted(file)">
-                解密下载
-              </button>
-            </template>
-            <button v-else class="download-btn" @click="download(file)">
-              下载
-            </button>
-          </div>
-
-          <div class="verify-toggle">
-            <button
-              class="verify-toggle-btn"
-              :class="{ expanded: verifyExpanded[filePath(file)] }"
-              @click="toggleVerify(filePath(file))"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-              文件校验
-            </button>
           </div>
 
           <div v-if="verifyExpanded[filePath(file)]" class="verify-area">
@@ -644,7 +648,6 @@ onUnmounted(stopAutoRefresh)
 .file-item {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid var(--border-color);
@@ -657,9 +660,25 @@ onUnmounted(stopAutoRefresh)
   border-color: var(--border-strong);
 }
 
+.file-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
 .file-info {
   min-width: 0;
-  width: 100%;
+  flex: 1;
+}
+
+.file-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .file-name {
@@ -725,8 +744,8 @@ onUnmounted(stopAutoRefresh)
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-start;
-  width: 100%;
+  justify-content: flex-end;
+  width: auto;
 }
 
 .decrypt-input {
@@ -869,7 +888,7 @@ onUnmounted(stopAutoRefresh)
 }
 
 .verify-toggle {
-  width: 100%;
+  width: auto;
 }
 
 .verify-toggle-btn {
