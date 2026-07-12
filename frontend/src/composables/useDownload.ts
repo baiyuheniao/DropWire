@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import axios from 'axios'
 import { recordDownload } from './useNetworkSpeed'
+import { downloadLimiter } from './useRateLimit'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2 MB，与上传保持一致
 const CONCURRENCY = 3
@@ -163,6 +164,7 @@ export async function startDownload(
 
       try {
         const { buffer: buf, durationMs } = await downloadChunkWithRetry(url, start, end, signal)
+        await downloadLimiter.consume(buf.byteLength)
         task.chunks[idx] = buf
         task.downloadedChunks++
         task.receivedBytes += buf.byteLength

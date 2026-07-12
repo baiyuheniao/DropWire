@@ -3,6 +3,15 @@ import axios from 'axios'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
+export type SpeedUnit = 'B' | 'KB' | 'MB' | 'GB'
+
+export const SPEED_UNIT_MULTIPLIERS: Record<SpeedUnit, number> = {
+  B: 1,
+  KB: 1024,
+  MB: 1024 * 1024,
+  GB: 1024 * 1024 * 1024,
+}
+
 export interface AppSettings {
   apiBase: string
   autoRefresh: boolean
@@ -10,6 +19,12 @@ export interface AppSettings {
   theme: ThemeMode
   qrValidityMinutes: number
   notificationsEnabled: boolean
+  uploadRateLimitEnabled: boolean
+  uploadRateLimit: number
+  uploadRateLimitUnit: SpeedUnit
+  downloadRateLimitEnabled: boolean
+  downloadRateLimit: number
+  downloadRateLimitUnit: SpeedUnit
 }
 
 export interface QrValidityOption {
@@ -34,6 +49,12 @@ const defaultSettings: AppSettings = {
   theme: 'system',
   qrValidityMinutes: 60,
   notificationsEnabled: true,
+  uploadRateLimitEnabled: false,
+  uploadRateLimit: 1,
+  uploadRateLimitUnit: 'MB',
+  downloadRateLimitEnabled: false,
+  downloadRateLimit: 1,
+  downloadRateLimitUnit: 'MB',
 }
 
 export const settings = ref<AppSettings>({ ...defaultSettings })

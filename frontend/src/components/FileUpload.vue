@@ -68,6 +68,18 @@
           <p v-if="task.status === 'done'" class="detail-hint">点击打开详情页</p>
           <p v-if="task.error" class="error-msg">{{ task.error }}</p>
         </div>
+
+        <button
+          v-if="task.status === 'done' && canPreview(task.filename)"
+          class="preview-btn"
+          @click.stop="openPreview(task)"
+          title="预览文件"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+          预览
+        </button>
       </div>
     </TransitionGroup>
 
@@ -80,6 +92,14 @@
       :encrypted="!!props.options?.password"
       @close="selectedTask = null"
     />
+
+    <FilePreviewModal
+      v-if="previewingTask"
+      :url="previewingTask.downloadUrl"
+      :filename="previewingTask.filename"
+      :size="previewingTask.fileSize"
+      @close="previewingTask = null"
+    />
   </div>
 </template>
 
@@ -89,6 +109,7 @@ import { useUpload, type UploadOptions, type UploadTask, type TaskStatus } from 
 import { addHistory } from '../composables/useHistory'
 import { useWebSocket } from '../composables/useWebSocket'
 import FileDetailModal from './FileDetailModal.vue'
+import FilePreviewModal from './FilePreviewModal.vue'
 
 const props = defineProps<{
   options?: UploadOptions
@@ -97,6 +118,7 @@ const props = defineProps<{
 const fileInput = ref<HTMLInputElement>()
 const isDragging = ref(false)
 const selectedTask = ref<UploadTask | null>(null)
+const previewingTask = ref<UploadTask | null>(null)
 const { tasks, uploadFile } = useUpload()
 const { received } = useWebSocket('/ws')
 
@@ -145,6 +167,15 @@ watch(
 
 function openDetail(task: UploadTask) {
   selectedTask.value = task
+}
+
+function canPreview(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'mp4', 'webm', 'ogg', 'mp3', 'wav', 'txt', 'md', 'json', 'xml', 'pdf', 'html', 'css', 'js', 'ts'].includes(ext)
+}
+
+function openPreview(task: UploadTask) {
+  previewingTask.value = task
 }
 
 async function collectFiles(items: DataTransferItemList): Promise<File[]> {
@@ -466,6 +497,32 @@ function label(s: TaskStatus) { return STATUS_LABELS[s] }
   font-size: 12px;
   color: var(--primary-text);
   margin-top: 6px;
+}
+
+.preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+
+.preview-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--bg-primary-soft);
+}
+
+.preview-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* Transition */

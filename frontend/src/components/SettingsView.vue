@@ -91,6 +91,56 @@
       </section>
 
       <section class="section">
+        <h3>上传限速</h3>
+        <p class="hint">限制上传文件时的最高速度，避免占用全部带宽</p>
+        <div class="rate-limit-row">
+          <label class="checkbox-row">
+            <input v-model="form.uploadRateLimitEnabled" type="checkbox" />
+            <span>启用上传限速</span>
+          </label>
+          <div v-if="form.uploadRateLimitEnabled" class="rate-limit-controls">
+            <input
+              v-model.number="form.uploadRateLimit"
+              type="number"
+              min="1"
+              class="rate-input"
+              placeholder="速度"
+            />
+            <select v-model="form.uploadRateLimitUnit" class="rate-unit-select">
+              <option v-for="u in speedUnits" :key="u" :value="u">{{ u }}/s</option>
+            </select>
+            <button class="btn-primary" @click="saveUploadRate">保存</button>
+          </div>
+        </div>
+        <p v-if="uploadRateSaved" class="success-msg">已保存</p>
+      </section>
+
+      <section class="section">
+        <h3>下载限速</h3>
+        <p class="hint">限制下载文件时的最高速度，避免占用全部带宽</p>
+        <div class="rate-limit-row">
+          <label class="checkbox-row">
+            <input v-model="form.downloadRateLimitEnabled" type="checkbox" />
+            <span>启用下载限速</span>
+          </label>
+          <div v-if="form.downloadRateLimitEnabled" class="rate-limit-controls">
+            <input
+              v-model.number="form.downloadRateLimit"
+              type="number"
+              min="1"
+              class="rate-input"
+              placeholder="速度"
+            />
+            <select v-model="form.downloadRateLimitUnit" class="rate-unit-select">
+              <option v-for="u in speedUnits" :key="u" :value="u">{{ u }}/s</option>
+            </select>
+            <button class="btn-primary" @click="saveDownloadRate">保存</button>
+          </div>
+        </div>
+        <p v-if="downloadRateSaved" class="success-msg">已保存</p>
+      </section>
+
+      <section class="section">
         <h3>通知</h3>
         <label class="checkbox-row">
           <input v-model="form.notificationsEnabled" type="checkbox" @change="saveNotifications" />
@@ -111,8 +161,15 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { type User } from '../composables/useAuth'
-import { QR_VALIDITY_OPTIONS, settings, saveSettings, type ThemeMode } from '../composables/useSettings'
+import {
+  QR_VALIDITY_OPTIONS,
+  settings,
+  saveSettings,
+  type ThemeMode,
+  type SpeedUnit,
+} from '../composables/useSettings'
 import { requestNotificationPermission } from '../composables/useNotifications'
+import { refreshUploadLimiter, refreshDownloadLimiter } from '../composables/useRateLimit'
 import NetworkTestPanel from './NetworkTestPanel.vue'
 
 defineProps<{
@@ -126,12 +183,16 @@ const emit = defineEmits<{
 
 const form = reactive({ ...settings.value })
 const serverSaved = ref(false)
+const uploadRateSaved = ref(false)
+const downloadRateSaved = ref(false)
 
 const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
   { value: 'system', label: '跟随系统' },
 ]
+
+const speedUnits: SpeedUnit[] = ['B', 'KB', 'MB', 'GB']
 
 const qrOptions = QR_VALIDITY_OPTIONS
 
@@ -164,6 +225,30 @@ function saveNotifications() {
   if (form.notificationsEnabled) {
     requestNotificationPermission()
   }
+}
+
+function saveUploadRate() {
+  const value = Math.max(1, Number(form.uploadRateLimit) || 1)
+  saveSettings({
+    uploadRateLimitEnabled: form.uploadRateLimitEnabled,
+    uploadRateLimit: value,
+    uploadRateLimitUnit: form.uploadRateLimitUnit,
+  })
+  refreshUploadLimiter()
+  uploadRateSaved.value = true
+  setTimeout(() => (uploadRateSaved.value = false), 3000)
+}
+
+function saveDownloadRate() {
+  const value = Math.max(1, Number(form.downloadRateLimit) || 1)
+  saveSettings({
+    downloadRateLimitEnabled: form.downloadRateLimitEnabled,
+    downloadRateLimit: value,
+    downloadRateLimitUnit: form.downloadRateLimitUnit,
+  })
+  refreshDownloadLimiter()
+  downloadRateSaved.value = true
+  setTimeout(() => (downloadRateSaved.value = false), 3000)
 }
 </script>
 
@@ -395,6 +480,50 @@ function saveNotifications() {
   margin-top: 10px;
   font-size: 13px;
   color: var(--success-text);
+}
+
+.rate-limit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rate-limit-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rate-input {
+  width: 100px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.rate-input:focus {
+  border-color: var(--primary);
+}
+
+.rate-unit-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+}
+
+.rate-unit-select:focus {
+  border-color: var(--primary);
 }
 
 @media (max-width: 640px) {

@@ -48,6 +48,19 @@
           </div>
 
           <div class="download-area">
+            <!-- 预览按钮：仅支持未加密的可预览文件类型 -->
+            <button
+              v-if="!file.encrypted && canPreview(file.filename)"
+              class="preview-btn"
+              @click="openPreview(file)"
+              title="预览文件"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+              预览
+            </button>
+
             <!-- 下载中 / 暂停 / 完成：显示进度条 + 控制按钮 -->
             <div
               v-if="downloadTasks[filePath(file)]"
@@ -145,6 +158,14 @@
       initial-tab="receive"
       @close="showHistory = false"
     />
+
+    <FilePreviewModal
+      v-if="previewingFile"
+      :url="previewUrl"
+      :filename="previewingFile.filename"
+      :size="previewingFile.size"
+      @close="previewingFile = null"
+    />
   </div>
 </template>
 
@@ -153,6 +174,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import axios from 'axios'
 import { type User } from '../composables/useAuth'
 import HistoryModal from './HistoryModal.vue'
+import FilePreviewModal from './FilePreviewModal.vue'
 import { settings } from '../composables/useSettings'
 import { decryptFile } from '../composables/useCrypto'
 import { addHistory } from '../composables/useHistory'
@@ -206,6 +228,7 @@ const decryptPasswords = reactive<Record<string, string>>({})
 const knownFilenames = ref<Set<string>>(new Set())
 const downloadedBuffers = reactive<Record<string, ArrayBuffer>>({})
 const { tasks: downloadTasks } = useDownload()
+const previewingFile = ref<FileInfo | null>(null)
 const verifyState = reactive<
   Record<string, {
     algorithm: string
@@ -214,6 +237,20 @@ const verifyState = reactive<
     actual?: string
   }>
 >({})
+
+const previewUrl = computed(() => {
+  if (!previewingFile.value) return ''
+  return `/download/${encodeURIComponent(filePath(previewingFile.value))}`
+})
+
+function canPreview(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'mp4', 'webm', 'ogg', 'mp3', 'wav', 'txt', 'md', 'json', 'xml', 'pdf', 'html', 'css', 'js', 'ts'].includes(ext)
+}
+
+function openPreview(file: FileInfo) {
+  previewingFile.value = file
+}
 
 function getVerifyState(file: FileInfo) {
   const path = filePath(file)
@@ -704,6 +741,32 @@ onUnmounted(stopAutoRefresh)
 
 .download-btn:hover {
   background: var(--primary-hover);
+}
+
+.preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  white-space: nowrap;
+}
+
+.preview-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--bg-primary-soft);
+}
+
+.preview-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .download-progress-wrapper {

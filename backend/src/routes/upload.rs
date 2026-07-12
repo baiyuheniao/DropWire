@@ -21,6 +21,38 @@ const TEMP_DIR: &str = "./temp_chunks";
 const OUTPUT_DIR: &str = "./uploads";
 const META_DIR: &str = "./uploads_meta";
 
+fn content_type_for(filename: &str) -> &'static str {
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "ogg" => "video/ogg",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "webm" => "audio/webm",
+        "txt" => "text/plain; charset=utf-8",
+        "md" => "text/markdown; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "xml" => "application/xml; charset=utf-8",
+        "pdf" => "application/pdf",
+        "html" => "text/html; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "js" => "application/javascript",
+        "ts" => "application/typescript",
+        _ => "application/octet-stream",
+    }
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -275,6 +307,7 @@ pub async fn download_file(
         .and_then(|n| n.to_str())
         .unwrap_or(&filename);
     let disposition = format!("attachment; filename=\"{}\"", disposition_filename);
+    let content_type = content_type_for(disposition_filename);
 
     // Parse Range header for resumable download.
     let (start, end) = if let Some(range_header) = headers.get(header::RANGE) {
@@ -323,7 +356,7 @@ pub async fn download_file(
 
     let mut builder = Response::builder()
         .status(status)
-        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CONTENT_LENGTH, length.to_string());
 
