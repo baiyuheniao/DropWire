@@ -122,7 +122,20 @@
             </button>
           </div>
 
-          <div class="verify-area">
+          <div class="verify-toggle">
+            <button
+              class="verify-toggle-btn"
+              :class="{ expanded: verifyExpanded[filePath(file)] }"
+              @click="toggleVerify(filePath(file))"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+              文件校验
+            </button>
+          </div>
+
+          <div v-if="verifyExpanded[filePath(file)]" class="verify-area">
             <select v-model="getVerifyState(file).algorithm" class="verify-select">
               <option v-for="alg in HASH_ALGORITHMS" :key="alg.value" :value="alg.value">
                 {{ alg.label }}
@@ -237,6 +250,7 @@ const verifyState = reactive<
     actual?: string
   }>
 >({})
+const verifyExpanded = reactive<Record<string, boolean>>({})
 
 const previewUrl = computed(() => {
   if (!previewingFile.value) return ''
@@ -262,6 +276,10 @@ function getVerifyState(file: FileInfo) {
     }
   }
   return verifyState[path]
+}
+
+function toggleVerify(path: string) {
+  verifyExpanded[path] = !verifyExpanded[path]
 }
 
 async function runVerify(file: FileInfo, buffer: ArrayBuffer) {
@@ -850,13 +868,51 @@ onUnmounted(stopAutoRefresh)
   color: var(--primary);
 }
 
+.verify-toggle {
+  width: 100%;
+}
+
+.verify-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.verify-toggle-btn:hover {
+  background: var(--bg-card);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.verify-toggle-btn svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s ease;
+}
+
+.verify-toggle-btn.expanded svg {
+  transform: rotate(180deg);
+}
+
 .verify-area {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 4px;
   flex-wrap: wrap;
+  padding: 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
 }
 
 .verify-select {
