@@ -35,21 +35,21 @@
 - WebSocket 实时推送传输进度
 - 断点续传支持，网络中断后可从断点继续
 
-![发送页面](https://picsum.photos/id/0/1200/675)
+![发送页面](https://raw.githubusercontent.com/baiyuheniao/DropWire/wjsWW/screenshots/send-page.png)
 
 #### 核心功能二：安全加密传输
 - AES-256-GCM 端到端加密
 - Argon2 密码哈希安全存储
 - 支持多种文件校验算法（SHA-256/MD5/CRC32）
 
-![接收页面](https://picsum.photos/id/180/1200/675)
+![接收页面](https://raw.githubusercontent.com/baiyuheniao/DropWire/wjsWW/screenshots/receive-page.png)
 
 #### 核心功能三：网络诊断与测速
 - 局域网设备自动发现与拓扑图
 - 内/公网测速可视化仪表盘
 - 实时上行/下行速度指示器
 
-![网络诊断](https://picsum.photos/id/119/1200/675)
+![网络诊断](https://raw.githubusercontent.com/baiyuheniao/DropWire/wjsWW/screenshots/network-diagnosis.png)
 
 ---
 
@@ -110,20 +110,20 @@ pnpm dev
 
 ### 关键步骤截图
 
-#### 步骤一：安全问题修复
-修复密码明文存储问题，使用 Argon2 哈希存储密码。
+#### 步骤一：发送页面开发
+开发文件发送页面，包含拖拽上传区域、设备列表、加密选项等核心功能。
 
-![安全修复](https://picsum.photos/id/48/1200/675)
+![发送页面开发](https://raw.githubusercontent.com/baiyuheniao/DropWire/wjsWW/screenshots/send-page.png)
 
-#### 步骤二：速度可视化仪表盘开发
-创建半圆弧速度仪表盘组件，直观展示测速结果。
+#### 步骤二：接收页面开发
+开发文件接收页面，包含文件列表、预览下载、文件校验等功能。
 
-![速度仪表盘开发](https://picsum.photos/id/20/1200/675)
+![接收页面开发](https://raw.githubusercontent.com/baiyuheniao/DropWire/wjsWW/screenshots/receive-page.png)
 
-#### 步骤三：网络诊断功能实现
-实现局域网设备发现和网络诊断功能。
+#### 步骤三：网络诊断功能开发
+开发网络诊断模块，包含网络状态、局域网拓扑图、速度仪表盘等功能。
 
-![网络诊断开发](https://picsum.photos/id/160/1200/675)
+![网络诊断开发](https://raw.githubusercontent.com/baiyuheniao/DropWire/wjsWW/screenshots/network-diagnosis.png)
 
 ### 关键任务证明
 
@@ -135,6 +135,7 @@ pnpm dev
 3. **接收端校验**：`2a456d2` - 补齐 MD5/CRC32 校验算法支持
 4. **布局优化**：`d21d503` - 接收端按钮右侧对齐布局调整
 5. **参赛材料**：`c07a10c` - 生成参赛文档（README.md、FEATURES.md、SCREENSHOTS.md）
+6. **真实截图**：`a52c5f7` - 添加真实演示截图
 
 #### PR 链接
 - 合并到 main 分支的 PR：https://github.com/baiyuheniao/DropWire/pull/9
