@@ -90,14 +90,42 @@
                       {{ internalResult.loading ? '测试中...' : '开始内网测速' }}
                     </button>
                   </div>
-                  <div v-if="internalResult.upload || internalResult.download" class="speed-result">
-                    <div class="speed-row">
-                      <span class="speed-label">上行</span>
-                      <span class="speed-value">{{ formatResult(internalResult.upload) }}</span>
+                  <div v-if="internalResult.loading" class="speed-pulse">
+                    <div class="pulse-ring" />
+                    <span>正在传输测试数据...</span>
+                  </div>
+                  <div v-else-if="internalResult.upload || internalResult.download" class="speed-visual">
+                    <SpeedGauge
+                      :speed-mbps="internalResult.upload?.speedMbps || 0"
+                      label="上行速度"
+                      class="gauge"
+                    />
+                    <SpeedGauge
+                      :speed-mbps="internalResult.download?.speedMbps || 0"
+                      label="下行速度"
+                      class="gauge"
+                    />
+                  </div>
+                  <div v-if="internalResult.upload || internalResult.download" class="speed-bars">
+                    <div class="bar-row">
+                      <span class="bar-label">上行</span>
+                      <div class="bar-track">
+                        <div
+                          class="bar-fill upload"
+                          :style="{ width: barPct(internalResult.upload) + '%' }"
+                        />
+                      </div>
+                      <span class="bar-value">{{ formatResult(internalResult.upload) }}</span>
                     </div>
-                    <div class="speed-row">
-                      <span class="speed-label">下行</span>
-                      <span class="speed-value">{{ formatResult(internalResult.download) }}</span>
+                    <div class="bar-row">
+                      <span class="bar-label">下行</span>
+                      <div class="bar-track">
+                        <div
+                          class="bar-fill download"
+                          :style="{ width: barPct(internalResult.download) + '%' }"
+                        />
+                      </div>
+                      <span class="bar-value">{{ formatResult(internalResult.download) }}</span>
                     </div>
                   </div>
                 </div>
@@ -118,14 +146,42 @@
                       {{ publicResult.loading ? '测试中...' : '开始公网测速' }}
                     </button>
                   </div>
-                  <div v-if="publicResult.upload || publicResult.download" class="speed-result">
-                    <div class="speed-row">
-                      <span class="speed-label">上行</span>
-                      <span class="speed-value">{{ formatResult(publicResult.upload) }}</span>
+                  <div v-if="publicResult.loading" class="speed-pulse">
+                    <div class="pulse-ring" />
+                    <span>正在传输测试数据...</span>
+                  </div>
+                  <div v-else-if="publicResult.upload || publicResult.download" class="speed-visual">
+                    <SpeedGauge
+                      :speed-mbps="publicResult.upload?.speedMbps || 0"
+                      label="上行速度"
+                      class="gauge"
+                    />
+                    <SpeedGauge
+                      :speed-mbps="publicResult.download?.speedMbps || 0"
+                      label="下行速度"
+                      class="gauge"
+                    />
+                  </div>
+                  <div v-if="publicResult.upload || publicResult.download" class="speed-bars">
+                    <div class="bar-row">
+                      <span class="bar-label">上行</span>
+                      <div class="bar-track">
+                        <div
+                          class="bar-fill upload"
+                          :style="{ width: barPct(publicResult.upload) + '%' }"
+                        />
+                      </div>
+                      <span class="bar-value">{{ formatResult(publicResult.upload) }}</span>
                     </div>
-                    <div class="speed-row">
-                      <span class="speed-label">下行</span>
-                      <span class="speed-value">{{ formatResult(publicResult.download) }}</span>
+                    <div class="bar-row">
+                      <span class="bar-label">下行</span>
+                      <div class="bar-track">
+                        <div
+                          class="bar-fill download"
+                          :style="{ width: barPct(publicResult.download) + '%' }"
+                        />
+                      </div>
+                      <span class="bar-value">{{ formatResult(publicResult.download) }}</span>
                     </div>
                   </div>
                   <p class="speed-note">公网测速由后端代理到 Cloudflare Speed Test。</p>
@@ -152,6 +208,7 @@ import {
   formatMbps,
 } from '../composables/useNetworkTest'
 import NetworkTopologyChart from './NetworkTopologyChart.vue'
+import SpeedGauge from './SpeedGauge.vue'
 
 const internalSize = ref(10)
 const publicSize = ref(10)
@@ -168,6 +225,12 @@ function closeModal() {
 
 function formatResult(result: { speedMbps: number } | null) {
   return result ? formatMbps(result.speedMbps) : '-'
+}
+
+function barPct(result: { speedMbps: number } | null): number {
+  if (!result) return 0
+  const max = Math.max(result.speedMbps, 100)
+  return Math.min((result.speedMbps / max) * 100, 100)
 }
 
 onMounted(fetchNetworkStatus)
@@ -401,27 +464,97 @@ onMounted(fetchNetworkStatus)
   outline: none;
 }
 
-.speed-result {
+.speed-visual {
   display: flex;
   gap: 24px;
   flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 12px;
 }
 
-.speed-row {
+.gauge {
+  flex: 1 1 220px;
+  max-width: 280px;
+}
+
+.speed-pulse {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
-.speed-label {
+.pulse-ring {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: pulse 1.2s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.speed-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bar-label {
+  width: 40px;
   font-size: 13px;
   color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
-.speed-value {
-  font-size: 15px;
+.bar-track {
+  flex: 1;
+  height: 10px;
+  background: var(--bg-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.bar-fill.upload {
+  background: linear-gradient(90deg, var(--primary), var(--primary-light, var(--primary)));
+}
+
+.bar-fill.download {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.bar-value {
+  width: 90px;
+  text-align: right;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--primary);
+  color: var(--text-primary);
+  flex-shrink: 0;
 }
 
 .speed-note {
