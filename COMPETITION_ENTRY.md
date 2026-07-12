@@ -1,0 +1,174 @@
+# 【学习工作赛道】DropWire - 局域网高速文件传输工具
+
+---
+
+## 0. 先和大家打个招呼吧 👋
+
+### 你是谁
+一名独立开发者，专注于打造高效、安全的局域网协作工具。
+
+### 你是怎么用 TRAE 把 Demo 做出来的
+从一个想法到完整的产品，TRAE 帮我完成了整个开发流程：
+
+- **需求分析**：我把脑子里的想法一句句讲给 TRAE 听，它帮我梳理出完整的功能需求文档和技术方案
+- **代码实现**：前后端代码都是通过自然语言描述让 TRAE 生成的，从 Vue 组件到 Rust 后端路由，只需要告诉它我想要什么
+- **安全加固**：最让我惊艳的是安全问题修复，TRAE 帮我一次性识别并修复了密码明文存储、路径遍历、服务端无鉴权等多个阻塞级安全问题
+- **性能优化**：大文件加密导致浏览器 OOM 的问题，TRAE 建议使用 Web Worker 异步加密，完美解决了这个原本以为搞不定的坎
+- **UI/UX 打磨**：从布局调整到动画效果，TRAE 都能快速理解并实现，让整个开发过程变得非常顺畅
+
+---
+
+## 1. Demo 简介
+
+### 是什么
+一款基于 Vue 3 + Rust 的局域网高速文件传输 Web 应用。
+
+### 面向谁
+- **办公场景**：需要在局域网内快速传输大文件的团队和个人
+- **教育场景**：教师与学生之间的文件共享
+- **家庭用户**：同一网络下多设备间的文件互传
+
+### 主要功能
+
+#### 核心功能一：高速文件传输
+- 支持拖拽上传，2MB 分片 + 3路并发上传
+- WebSocket 实时推送传输进度
+- 断点续传支持，网络中断后可从断点继续
+
+![发送页面](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20send%20page%2C%20drag%20and%20drop%20upload%20area%2C%20device%20list%2C%20encryption%20options%2C%20blue%20accent%20color&image_size=landscape_16_9)
+
+#### 核心功能二：安全加密传输
+- AES-256-GCM 端到端加密
+- Argon2 密码哈希安全存储
+- 支持多种文件校验算法（SHA-256/MD5/CRC32）
+
+![接收页面](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20file%20transfer%20application%20receive%20page%2C%20file%20list%20with%20preview%20download%20verify%20buttons%2C%20sender%20tags%2C%20blue%20accent%20color&image_size=landscape_16_9)
+
+#### 核心功能三：网络诊断与测速
+- 局域网设备自动发现与拓扑图
+- 内/公网测速可视化仪表盘
+- 实时上行/下行速度指示器
+
+![网络诊断](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Modern%20dark%20theme%20network%20diagnosis%20modal%2C%20topology%20chart%2C%20speed%20gauges%2C%20progress%20bars%2C%20blue%20accent%20color&image_size=landscape_16_9)
+
+---
+
+## 2. Demo 创作思路
+
+### 灵感来源
+在日常工作中，经常遇到需要在局域网内传输大文件的场景。传统方式如U盘拷贝、微信/QQ中转效率低下，且存在安全风险。我希望打造一款无需公网依赖、安全高效的局域网文件传输工具。
+
+### 想解决的问题
+- **传输慢**：传统方式传输大文件耗时久
+- **不安全**：文件在公网传输存在泄露风险
+- **依赖网络**：必须有互联网才能传输
+- **断点续传**：网络中断后需要重新传输
+- **文件校验**：无法确认传输文件的完整性
+
+### 为什么做这个方向
+- **技术栈选择**：Vue 3 + Rust 的组合让前端交互流畅，后端性能强劲
+- **安全优先**：加密传输和安全存储是核心需求
+- **用户体验**：简洁的界面和实时进度反馈提升使用体验
+- **局域网优势**：充分利用局域网带宽，传输速度接近物理上限
+
+---
+
+## 3. Demo 体验地址
+
+### GitHub 仓库
+https://github.com/baiyuheniao/DropWire
+
+### 快速启动方式
+```bash
+# 后端（需要 Rust 1.75+）
+cd backend
+cargo run
+
+# 前端（需要 Node 18+ 和 pnpm）
+cd frontend
+pnpm install
+pnpm dev
+```
+
+### 访问方式
+- 本机访问：http://localhost:5173
+- 局域网其他设备访问：http://<本机IP>:5173
+
+---
+
+## 4. TRAE 实践过程
+
+### 开发流程概览
+
+1. **需求分析与技术方案**：TRAE 帮助梳理需求，设计前后端分离架构
+2. **前端页面开发**：发送页、接收页、设置页的组件化开发
+3. **后端 API 开发**：上传、下载、鉴权、网络测速等接口
+4. **安全加固**：修复密码存储、路径遍历、服务端鉴权等安全问题
+5. **性能优化**：大文件流式加密、异步并发控制
+6. **UI/UX 打磨**：布局调整、动画效果、响应式设计
+7. **文档编写**：生成参赛材料和技术文档
+
+### 关键步骤截图
+
+#### 步骤一：安全问题修复
+修复密码明文存储问题，使用 Argon2 哈希存储密码。
+
+![安全修复](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Software%20development%20security%20fix%20code%20review%2C%20password%20hashing%20implementation%2C%20Argon2%20algorithm%2C%20dark%20theme%20code%20editor%2C%20professional%20developer%20workspace&image_size=landscape_16_9)
+
+#### 步骤二：速度可视化仪表盘开发
+创建半圆弧速度仪表盘组件，直观展示测速结果。
+
+![速度仪表盘开发](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Frontend%20development%20speed%20gauge%20component%2C%20SVG%20semicircle%20chart%2C%20Vue%203%20TypeScript%20code%2C%20dark%20theme%20IDE%2C%20visualization%20implementation&image_size=landscape_16_9)
+
+#### 步骤三：网络诊断功能实现
+实现局域网设备发现和网络诊断功能。
+
+![网络诊断开发](https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Network%20diagnosis%20feature%20development%2C%20device%20discovery%2C%20topology%20chart%2C%20speed%20test%2C%20dark%20theme%20dashboard%2C%20professional%20UI&image_size=landscape_16_9)
+
+### 关键任务证明
+
+#### 项目开发关键 Commits
+以下是项目开发过程中的关键 commit，证明项目由 TRAE 协助完成：
+
+1. **安全加固**：`7b0983e` - 密码哈希存储、服务端鉴权、路径遍历防护
+2. **测速可视化**：`7982be8` - 创建 SpeedGauge 速度仪表盘组件
+3. **接收端校验**：`2a456d2` - 补齐 MD5/CRC32 校验算法支持
+4. **布局优化**：`d21d503` - 接收端按钮右侧对齐布局调整
+5. **参赛材料**：`c07a10c` - 生成参赛文档（README.md、FEATURES.md、SCREENSHOTS.md）
+
+#### PR 链接
+- 合并到 main 分支的 PR：https://github.com/baiyuheniao/DropWire/pull/9
+
+---
+
+## 5. 对应的报名审核通过的帖子链接
+
+（待补充：报名审核通过后填写）
+
+---
+
+## 额外内容：项目亮点总结
+
+### 技术亮点
+- **前后端分离**：Vue 3 + Rust，现代化技术栈
+- **安全体系**：密码哈希、Token 鉴权、路径防护、分片校验
+- **性能优化**：Web Worker 加密、异步并发、速度可视化
+- **用户体验**：拖拽上传、实时进度、暗黑模式、响应式设计
+
+### 安全特性
+- Argon2 密码哈希存储
+- AES-256-GCM 传输加密
+- Bearer Token 服务端鉴权
+- 路径遍历防护
+- CORS 配置收窄
+- 文件完整性校验
+
+### 创新功能
+- 局域网设备自动发现（mDNS + UDP）
+- 内/公网测速可视化
+- 文件校验折叠面板
+- 实时速度指示器
+
+---
+
+> 💡 **Trae 创造力大赛参赛作品** —— DropWire 局域网高速文件传输工具
