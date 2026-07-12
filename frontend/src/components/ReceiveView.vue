@@ -625,9 +625,9 @@ onUnmounted(stopAutoRefresh)
 
 .file-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
   padding: 14px 16px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
@@ -641,7 +641,7 @@ onUnmounted(stopAutoRefresh)
 
 .file-info {
   min-width: 0;
-  flex: 1;
+  width: 100%;
 }
 
 .file-name {
@@ -706,9 +706,9 @@ onUnmounted(stopAutoRefresh)
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  width: 100%;
 }
 
 .decrypt-input {
